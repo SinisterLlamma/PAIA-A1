@@ -127,22 +127,7 @@ We implemented and analyzed 12 distinct kernels, reflecting the gradual alleviat
 
 ---
 
-## 3. Simon Boehm Repository Cross-Comparison & Reuse Analysis
-
-To fulfill the primary assignment directive, we cloned and studied Simon Boehm's repository (`https://github.com/siboehm/SGEMM_CUDA`). Below is a systematic comparison of architectural design choices:
-
-| Dimension / Optimization | Simon Boehm's Implementation | Our Repository Implementation | Analysis & Architectural Impact |
-| :--- | :--- | :--- | :--- |
-| **Target Architecture** | **NVIDIA RTX A6000** (Ampere GA102, SM 8.6) | **NVIDIA RTX 3090** (Ampere GA102, SM 8.6) | Both GPUs share the identical Ampere GA102 microarchitecture (A6000: 84 SMs, 48 GB GDDR6 @ 768 GB/s; RTX 3090: 82 SMs, 24 GB GDDR6X @ 936 GB/s), explaining why our benchmark results (e.g., 21,888 GFLOPS vs Boehm's 21,779 GFLOPS) align with near-perfect consistency. |
-| **Kernel 8 Warp Sizing** | Block: $128 \times 128$, Warp: $32 \times 64$, Thread: $8 \times 8$ | Block: $128 \times 128$, Warp: $32 \times 64$, Thread: $8 \times 8$ | Direct code reuse of Boehm's warp layout yields **21,888 GFLOPS (89.8% of cuBLAS)**, proving the portability of 3-level tiling. |
-| **Double Buffering** | Software prefetching via registers (K11) / `cp.async` (K12) | Hardware `cp.async` (`cuda::memcpy_async` with `cuda::barrier`) | Direct adoption of Ampere hardware async memory copy pipeline, completely bypassing the register file during GMEM $\to$ SMEM transfers. |
-| **Boundary Handling** | Strict assumption: $M, N, K \pmod{\text{Tile}} == 0$ (Crashes/OOB on arbitrary dimensions) | Universal boundary guards + dynamic scalar fallback path | Safe execution on arbitrary matrix dimensions ($1000 \times 500 \times 750$) and odd sizes ($127, 255, 513$) with 100% test pass rate. |
-| **Bank Conflict Padding** | `extraCols = 5` in Kernel 8 & 9 | Retained `extraCols = 5` in Kernel 7 & 8 | Eliminates bank conflicts when loading $8 \times 8$ sub-tiles across warp lanes. |
-| **Build & Tooling** | Static Makefile / CMake with manual compute capability | Dynamic CMake + Makefile with automated architecture detection | Supports multi-GPU environments seamlessly (`sm_70`, `sm_75`, `sm_80`, `sm_86`, `sm_90`). |
-
----
-
-## 4. Empirical Benchmark Results
+## 3. Empirical Benchmark Results
 
 ### Complete Performance Table across Matrix Sizes ($N = 1024, 2048, 4096$)
 
@@ -165,24 +150,24 @@ The following measurements were collected on the NVIDIA RTX 3090 using high-reso
 
 ---
 
-## 5. Visual Analysis & Microarchitectural Plots
+## 4. Visual Analysis & Microarchitectural Plots
 
-### 5.1 Throughput by Optimization Stage ($N=4096$)
+### 4.1 Throughput by Optimization Stage ($N=4096$)
 The bar chart below illustrates the dramatic throughput escalation across optimization stages compared to the cuBLAS green dotted baseline.
 
 ![Throughput by Kernel](assets/plot_gflops_by_kernel.png)
 
-### 5.2 Efficiency Relative to cuBLAS
+### 4.2 Efficiency Relative to cuBLAS
 The percentage progression shows the breakthrough moments: vectorization ($76.2\%$) and warp tiling ($89.8\%$).
 
 ![Percentage of cuBLAS](assets/plot_pct_cublas.png)
 
-### 5.3 Performance Scaling Across Problem Dimensions
+### 4.3 Performance Scaling Across Problem Dimensions
 Small matrices ($N=1024$) suffer from under-utilization of the 82 SMs due to tail-effect quantization (too few blocks to saturate SM pipelines). As dimension increases to $N=4096$, kernels 6, 8, and 9 exhibit steady scaling as occupancy and pipeline latency hiding reach full saturation.
 
 ![GFLOPS vs Matrix Dimension](assets/plot_gflops_vs_size.png)
 
-### 5.4 Empirical Roofline Model Evaluation
+### 4.4 Empirical Roofline Model Evaluation
 
 The Roofline Model provides a visually intuitive, physically grounded performance bound for multicore and manycore processors (Williams et al., *CACM 2009*). The attainable floating-point performance $P$ (in GFLOPS) is strictly governed by:
 
@@ -236,7 +221,7 @@ If an analytical model assumes an $AI$ lower than $P / \text{Bandwidth}_{\text{p
 
 As verified in the updated plot, every single kernel sits strictly and properly below the physical theoretical ceiling.
 
-### 5.5 Parameter Sweep Analysis: Tile Depth ($BK$) & Register Pressure
+### 4.5 Parameter Sweep Analysis: Tile Depth ($BK$) & Register Pressure
 Our systematic parameter sweep evaluates the interplay between tile depth and thread-level register allocation:
 
 ![Parameter Sweep](assets/plot_bk_sweep.png)
@@ -244,32 +229,32 @@ Our systematic parameter sweep evaluates the interplay between tile depth and th
 - **Left Panel (BK Sensitivity):** Varying $BK \in \{4, 8, 16, 32\}$ with $BM=BN=128, TM=TN=8$ reveals that **$BK=8$ is optimal** ($8,098 \text{ GFLOPS}$ baseline). At $BK=4$, loop overhead and synchronization frequency double. At $BK \ge 16$, increased shared memory footprint reduces active blocks per SM.
 - **Right Panel (Thread Tile Register Pressure):** As thread tile size increases from $4 \times 4$ ($16$ registers) up to $16 \times 16$ ($256$ registers), performance initially rises as register reuse increases, peaking around $8 \times 8$ and $4 \times 4$. Beyond $8 \times 8$, register pressure forces register spilling into high-latency local memory (off-chip DRAM), causing performance to plummet to $3,937 \text{ GFLOPS}$.
 
-### 5.6 2D Tile Landscape Heatmap ($BM$ vs $TM$)
+### 4.6 2D Tile Landscape Heatmap ($BM$ vs $TM$)
 The 2D landscape below illustrates the trade-off space between block tile granularity ($BM$) and per-thread tile size ($TM$):
 
 ![Tile Landscape Heatmap](assets/plot_param_heatmap.png)
 
 ---
 
-## 6. Microarchitectural Deep-Dive
+## 5. Microarchitectural Deep-Dive
 
-### 6.1 DRAM Bus Transaction Efficiency & Coalescing
+### 5.1 DRAM Bus Transaction Efficiency & Coalescing
 On Ampere GPUs, global memory load requests are serviced in sectors of 32 bytes within 128-byte cache lines. In Kernel 1, thread $t_x$ and thread $t_x+1$ access elements separated by stride $N \times 4 \text{ bytes} = 16,384 \text{ bytes}$. Consequently, a single warp load requires 32 distinct 32-byte DRAM sector requests, wasting $\approx 87.5\%$ of the loaded bus bandwidth. In Kernel 2, reordering thread coordinates aligns memory addresses such that 32 consecutive threads read 32 contiguous 4-byte floats ($128 \text{ bytes}$), fulfilled in a single bus transaction cycle.
 
-### 6.2 Shared Memory Bank Conflicts & Vector Access Alignment
+### 5.2 Shared Memory Bank Conflicts & Vector Access Alignment
 Shared memory contains 32 independent banks where bank index is determined by:
 $$\text{Bank ID} = \left( \frac{\text{Address (bytes)}}{4} \right) \pmod{32}$$
 When 32 threads in a warp issue loads to SMEM, if $M$ threads request addresses mapped to the same bank (and different words), an $M$-way bank conflict occurs, serializing the request into $M$ separate phases.
 In Kernel 6, 128-bit vector loads (`float4`) access 16 consecutive bytes (4 words) per thread. Without padding, thread $i$ and thread $i+8$ can conflict depending on matrix stride. Adding an offset or padding (`extraCols = 5`) shifts the row pitch in shared memory, redistributing bank mappings across warp lanes and eliminating structural hazards.
 
-### 6.3 Register Allocation & The Occupancy-Reuse Tradeoff
+### 5.3 Register Allocation & The Occupancy-Reuse Tradeoff
 The NVIDIA Ampere SM provides 65,536 32-bit registers. The thread tile size $TM \times TN$ determines the minimum register footprint per thread:
 $$\text{Registers}_{\text{accum}} = TM \times TN$$
 $$\text{Registers}_{\text{operands}} = TM + TN$$
 For $TM=TN=8$, accumulator and operand buffers require $64 + 16 = 80$ registers per thread. With 256 threads per block, a single block requires $256 \times 80 = 20,480$ registers, allowing up to 3 active thread blocks per SM ($61,440 \le 65,536$).
 If the tile is enlarged to $TM=TN=16$, register requirements jump to $>280$ registers per thread. Because the hardware limit is 255 registers per thread, the compiler (`ptxas`) is forced to spill surplus variables into local memory (backed by L1/L2/DRAM), explaining the severe performance collapse seen in the parameter sweep plot.
 
-### 6.4 Ampere Asynchronous Copy Pipeline (`cp.async`)
+### 5.4 Ampere Asynchronous Copy Pipeline (`cp.async`)
 Prior to the Ampere microarchitecture, moving data from global memory into shared memory required a two-step transfer:
 1. `LDG` (Global $\to$ Register File)
 2. `STS` (Register File $\to$ Shared Memory)
@@ -281,7 +266,7 @@ This instruction bypasses the register file entirely, transferring bytes directl
 
 ---
 
-## 7. Multi-GPU Execution Protocol
+## 6. Multi-GPU Execution Protocol
 
 This repository is designed for automated multi-GPU profiling across heterogeneous NVIDIA architectures (e.g., V100, A100, H100, RTX 3090, RTX 4090).
 
@@ -314,7 +299,7 @@ python3 analysis/plot_results.py results/$(cat results/current_gpu.txt)/ --save
 
 ---
 
-## 8. Preliminary Conclusions & Future Roadmap
+## 7. Preliminary Conclusions & Future Roadmap
 
 ### Conclusions
 1. **Memory Hierarchy Dominance:** Naive matrix multiplication is bottlenecked by global memory bandwidth and transaction fragmentation ($1.2\%$ efficiency). Addressing coalescing and shared memory caching provides an immediate order-of-magnitude improvement ($12.1\%$).
