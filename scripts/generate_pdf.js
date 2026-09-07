@@ -34,7 +34,7 @@ const fullHtml = `<!DOCTYPE html>
         processEscapes: true
       },
       svg: {
-        fontCache: 'global'
+        fontCache: 'none'
       }
     };
   </script>
@@ -58,8 +58,8 @@ const fullHtml = `<!DOCTYPE html>
     .markdown-body {
       max-width: 100% !important;
       padding: 0 4px !important;
-      font-size: 13.5px !important;
-      line-height: 1.65 !important;
+      font-size: 13px !important;
+      line-height: 1.6 !important;
       background-color: transparent !important;
     }
     .markdown-body h1 {
@@ -68,28 +68,30 @@ const fullHtml = `<!DOCTYPE html>
       padding-bottom: 8px !important;
       margin-top: 10px !important;
       color: #1f2328 !important;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
     }
     .markdown-body h2 {
       font-size: 18px !important;
       border-bottom: 1px solid #d0d7de !important;
       padding-bottom: 6px !important;
       margin-top: 24px !important;
-      page-break-after: avoid;
-      break-after: avoid;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
       color: #0969da !important;
     }
     .markdown-body h3 {
       font-size: 15px !important;
       margin-top: 18px !important;
-      page-break-after: avoid;
-      break-after: avoid;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
       color: #24292f !important;
     }
     .markdown-body h4 {
       font-size: 14px !important;
       margin-top: 14px !important;
-      page-break-after: avoid;
-      break-after: avoid;
+      page-break-after: avoid !important;
+      break-after: avoid !important;
     }
     .markdown-body table {
       width: 100% !important;
@@ -103,12 +105,13 @@ const fullHtml = `<!DOCTYPE html>
     .markdown-body table th {
       background-color: #f6f8fa !important;
       font-weight: 600 !important;
-      padding: 6px 10px !important;
+      padding: 6px 8px !important;
       border: 1px solid #d0d7de !important;
-      text-align: left;
+      text-align: center !important;
+      vertical-align: middle !important;
     }
     .markdown-body table td {
-      padding: 6px 10px !important;
+      padding: 6px 8px !important;
       border: 1px solid #d0d7de !important;
     }
     .markdown-body table tr:nth-child(2n) {
@@ -133,12 +136,14 @@ const fullHtml = `<!DOCTYPE html>
       background-color: #f6f8fa !important;
       border: 1px solid #d0d7de !important;
       border-radius: 6px !important;
-      padding: 12px !important;
-      font-size: 11.5px !important;
+      padding: 10px 12px !important;
+      font-size: 10px !important;
+      line-height: 1.4 !important;
       page-break-inside: avoid;
       break-inside: avoid;
-      overflow-x: hidden !important;
-      white-space: pre-wrap !important;
+      overflow-x: auto !important;
+      white-space: pre !important;
+      font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace !important;
     }
     .markdown-body code {
       font-size: 88% !important;
@@ -150,13 +155,15 @@ const fullHtml = `<!DOCTYPE html>
     .markdown-body pre code {
       background-color: transparent !important;
       padding: 0 !important;
+      font-size: inherit !important;
+      white-space: pre !important;
     }
     .markdown-body blockquote {
       border-left: 4px solid #0969da !important;
       background-color: #f6f8fa !important;
-      padding: 8px 16px !important;
+      padding: 10px 16px !important;
       margin: 14px 0 !important;
-      color: #57606a !important;
+      color: #24292f !important;
       border-radius: 0 4px 4px 0;
       page-break-inside: avoid;
       break-inside: avoid;

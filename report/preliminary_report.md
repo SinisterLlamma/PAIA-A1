@@ -1,6 +1,6 @@
 # Comprehensive Performance Analysis of CUDA Matrix Multiplication Across GPU Microarchitectures
 **Assignment 1: Preliminary Technical Report**  
-**Author:** Eshaan 
+**Author:** Eshaan  
 **Target Hardware:** NVIDIA GeForce RTX 3090 (Ampere GA102, Compute Capability 8.6)  
 **Primary Reference:** Simon Boehm, *"How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance"* (`siboehm/SGEMM_CUDA`)  
 **Repository:** [https://github.com/SinisterLlamma/PAIA-A1](https://github.com/SinisterLlamma/PAIA-A1)
@@ -17,6 +17,7 @@ Matrix Multiplication ($C = \alpha AB + \beta C$, specifically Single-Precision 
 - **Hardware Asynchronous Pipeline:** Leveraging Ampere's hardware `cp.async` instructions (`cuda::memcpy_async` with `cuda::barrier`) delivers **18,105.1 GFLOPS (74.3% of cuBLAS)**, completely bypassing the Register File (RF) during global-to-shared memory staging.
 - **Roofline Alignment:** Empirical operational intensity increases from $0.25 \text{ FLOP/byte}$ (severely memory-bound) to $>80 \text{ FLOP/byte}$, successfully crossing the architecture's ridge point ($38.0 \text{ FLOP/byte}$) into the compute-saturated regime.
 - **Multi-Architecture Execution (Ampere GA102 vs. Ada Lovelace AD102):** Cross-GPU execution on an **NVIDIA L40S** (Compute Capability 8.9, 142 SMs, 96 MB L2 cache) demonstrates architectural scaling up to **37,688.8 GFLOPS (82.9% of L40S cuBLAS)**. The 16× larger L2 cache on Ada Lovelace provides a **3.11× speedup** on 2D blocktiling ($8,784.0 \to 27,354.7 \text{ GFLOPS}$), while asynchronous double-buffering scales to **2.08× speedup** across 142 SMs.
+
 ---
 
 ## 1. System & Microarchitecture Characterization
@@ -130,7 +131,7 @@ We implemented and analyzed 12 distinct kernels, reflecting the gradual alleviat
 
 The following measurements were collected on the NVIDIA RTX 3090 using high-resolution CUDA events (`cudaEventElapsedTime`) with 5 warm-up runs and 10 measured repetitions.
 
-| Kernel ID | Kernel Name | $N=1024$ Time | $N=1024$ GFLOPS | $N=2048$ Time | $N=2048$ GFLOPS | $N=4096$ Time | $N=4096$ GFLOPS | % of cuBLAS ($4096$) | Max Error vs Ref |
+| Kernel ID | Kernel Name | N = 1024 Time | N = 1024 GFLOPS | N = 2048 Time | N = 2048 GFLOPS | N = 4096 Time | N = 4096 GFLOPS | % of cuBLAS (N = 4096) | Max Error vs Ref |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **0** | **cuBLAS** (Reference) | 0.118 ms | 18,161.1 | 0.721 ms | 23,820.0 | 5.637 ms | **24,383.8** | **100.0%** | $0.00$ |
 | **1** | **1_Naive** | 8.246 ms | 260.4 | 57.007 ms | 301.4 | 455.875 ms | **301.5** | **1.2%** | $< 10^{-4}$ |
@@ -152,7 +153,7 @@ Simon Boehm's original reference implementation (`siboehm/SGEMM_CUDA`) makes str
 
 In this framework, all kernels incorporate **universal dynamic boundary clamps and scalar fallbacks**, enabling valid, numerically exact execution across any arbitrary dimension. The table below reports empirical performance across non-square, non-power-of-two, and odd prime dimensions on the RTX 3090:
 
-| Kernel ID | Kernel Name | Non-Square: $3000 \times 1500 \times 3000$ (GFLOPS) | Non-Square: $1000 \times 500 \times 750$ (GFLOPS) | Non-PoT Square: $3000 \times 3000 \times 3000$ (GFLOPS) | Odd Prime: $127 \times 127 \times 127$ (GFLOPS) | Verification Status vs cuBLAS |
+| Kernel ID | Kernel Name | Non-Square: 3000 × 1500 × 3000 (GFLOPS) | Non-Square: 1000 × 500 × 750 (GFLOPS) | Non-PoT Square: 3000 × 3000 × 3000 (GFLOPS) | Odd Prime: 127 × 127 × 127 (GFLOPS) | Verification Status vs cuBLAS |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
 | **0** | **cuBLAS** (Reference) | 22,214.1 | 11,480.0 | 20,204.7 | 87.4 | Baseline |
 | **1** | **1_Naive** | 731.6 | 715.7 | 760.8 | 141.2 | **PASS** ($< 10^{-4}$) |
@@ -318,7 +319,7 @@ To investigate how microarchitectural parameters govern execution efficiency and
 
 #### Complete Empirical Parameter Sweep Matrix
 
-| Configuration ID | Block Tile ($BM \times BN$) | Depth ($BK$) | Thread Tile ($TM \times TN$) | Threads / Block | SMEM / Block | Regs / Thread (Est.) | Time (ms) | Throughput (GFLOPS) | Bottleneck / Scaling Regime |
+| Configuration ID | Block Tile (BM × BN) | Depth (BK) | Thread Tile (TM × TN) | Threads / Block | SMEM / Block | Regs / Thread (Est.) | Time (ms) | Throughput (GFLOPS) | Bottleneck / Scaling Regime |
 | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :--- |
 | **1** | $128 \times 128$ | **4** | $8 \times 8$ | 256 | 4,096 B (4 KB) | 80 | 2.256 ms | 7,615.2 | Moderate loop barrier overhead |
 | **2** (Baseline) | $128 \times 128$ | **8** | $8 \times 8$ | 256 | 8,192 B (8 KB) | 80 | 2.046 ms | **8,397.4** | **Optimal depth balance point** |
@@ -418,7 +419,9 @@ The analytical table below details the theoretical resource boundaries across al
 | **11** | **11_Recursive_Tile** | 38 | 100.0% | 48 / 48 | 8,192 B (8 KB) | 3 (1024 thds) | 100.0% | On-Chip SMEM (L1) | 0 load conflicts | Moderate synchronization overhead |
 
 #### Empirical NVIDIA Nsight Compute (`ncu`) Hardware Measurements
-The table below displays the actual hardware performance counters measured by NVIDIA Nsight Compute (`ncu`) directly on the target RTX 3090 GPU 
+
+The table below displays the actual hardware performance counters measured by NVIDIA Nsight Compute (`ncu`) directly on the target RTX 3090 GPU:
+
 | Kernel ID | Kernel Name | SM Throughput (%) | DRAM Throughput (%) | L2 Cache Hit Rate (%) | L1 Cache Hit Rate (%) | SMEM Bank Conflicts (Loads) | SMEM Bank Conflicts (Stores) | Registers / Thread | Active Warps / Occupancy (%) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **0** | **cuBLAS** (Reference) | **51.83%** | 8.56% | **91.98%** | 0.00% | **0** | 241,664 | 82 | 25.28% |
@@ -648,33 +651,33 @@ The table below contrasts execution latency, sustained throughput (GFLOPS), rela
 
 | Dimension | Kernel ID | Kernel Name | RTX 3090 (GFLOPS) | RTX 3090 (% cuBLAS) | NVIDIA L40S (GFLOPS) | NVIDIA L40S (% cuBLAS) | Cross-GPU Speedup (L40S / 3090) |
 | :---: | :---: | :--- | :---: | :---: | :---: | :---: | :---: |
-| **$N=1024$** | **0** | **cuBLAS** | 18,161.1 | 100.0% | 30,670.6 | 100.0% | **1.69×** |
-| $N=1024$ | 1 | 1_Naive | 260.4 | 1.4% | 617.6 | 2.0% | **2.37×** |
-| $N=1024$ | 2 | 2_GMEM_Coalescing | 2,375.3 | 13.1% | 5,044.3 | 16.4% | **2.12×** |
-| $N=1024$ | 3 | 3_SMEM_Caching | 2,971.6 | 16.4% | 6,516.9 | 21.2% | **2.19×** |
-| $N=1024$ | 4 | 4_1D_Blocktile | 6,436.7 | 35.4% | 14,450.8 | 47.1% | **2.24×** |
-| $N=1024$ | 5 | 5_2D_Blocktile | 4,182.6 | 23.0% | 11,052.2 | 36.0% | **2.64×** |
-| $N=1024$ | 6 | 6_Vectorized | 12,272.6 | 67.6% | 13,470.3 | 43.9% | **1.10×** |
-| $N=1024$ | 8 | 8_Warptiling | 12,963.4 | 71.4% | 12,733.4 | 41.5% | **0.98×** |
-| $N=1024$ | 9 | 9_Double_Buffering | 12,953.4 | 71.3% | 19,904.6 | 64.9% | **1.54×** |
-| **$N=2048$** | **0** | **cuBLAS** | 23,820.0 | 100.0% | 45,768.1 | 100.0% | **1.92×** |
-| $N=2048$ | 1 | 1_Naive | 301.4 | 1.3% | 682.7 | 1.5% | **2.27×** |
-| $N=2048$ | 2 | 2_GMEM_Coalescing | 2,299.7 | 9.7% | 5,554.6 | 12.1% | **2.42×** |
-| $N=2048$ | 3 | 3_SMEM_Caching | 2,942.0 | 12.4% | 7,205.7 | 15.7% | **2.45×** |
-| $N=2048$ | 4 | 4_1D_Blocktile | 7,650.6 | 32.1% | 15,200.3 | 33.2% | **1.99×** |
-| $N=2048$ | 5 | 5_2D_Blocktile | 8,334.0 | 35.0% | 27,527.1 | 60.1% | **3.30×** |
-| $N=2048$ | 6 | 6_Vectorized | 17,045.5 | 71.6% | 33,425.6 | 73.0% | **1.96×** |
-| $N=2048$ | 8 | 8_Warptiling | 18,579.6 | 78.0% | 35,054.8 | 76.6% | **1.89×** |
-| $N=2048$ | 9 | 9_Double_Buffering | 16,222.4 | 68.1% | 38,105.2 | 83.3% | **2.35×** |
-| **$N=4096$** | **0** | **cuBLAS** | 24,383.8 | 100.0% | 45,437.6 | 100.0% | **1.86×** |
-| $N=4096$ | 1 | 1_Naive | 301.5 | 1.2% | 683.4 | 1.5% | **2.27×** |
-| $N=4096$ | 2 | 2_GMEM_Coalescing | 2,207.4 | 9.1% | 5,423.1 | 11.9% | **2.46×** |
-| $N=4096$ | 3 | 3_SMEM_Caching | 2,959.2 | 12.1% | 7,180.1 | 15.8% | **2.43×** |
-| $N=4096$ | 4 | 4_1D_Blocktile | 7,396.3 | 30.3% | 16,776.0 | 36.9% | **2.27×** |
-| $N=4096$ | 5 | 5_2D_Blocktile | 8,784.0 | 36.0% | 27,354.7 | **60.2%** | **3.11×** |
-| $N=4096$ | 6 | 6_Vectorized | 18,572.7 | 76.2% | 32,261.9 | 71.0% | **1.74×** |
-| $N=4096$ | 8 | 8_Warptiling | **21,888.0** | **89.8%** | 36,773.0 | 80.9% | **1.68×** |
-| $N=4096$ | 9 | 9_Double_Buffering | 18,105.1 | 74.3% | **37,688.8** | **82.9%** | **2.08×** |
+| **N = 1024** | **0** | **cuBLAS** | 18,161.1 | 100.0% | 30,670.6 | 100.0% | **1.69×** |
+| N = 1024 | 1 | 1_Naive | 260.4 | 1.4% | 617.6 | 2.0% | **2.37×** |
+| N = 1024 | 2 | 2_GMEM_Coalescing | 2,375.3 | 13.1% | 5,044.3 | 16.4% | **2.12×** |
+| N = 1024 | 3 | 3_SMEM_Caching | 2,971.6 | 16.4% | 6,516.9 | 21.2% | **2.19×** |
+| N = 1024 | 4 | 4_1D_Blocktile | 6,436.7 | 35.4% | 14,450.8 | 47.1% | **2.24×** |
+| N = 1024 | 5 | 5_2D_Blocktile | 4,182.6 | 23.0% | 11,052.2 | 36.0% | **2.64×** |
+| N = 1024 | 6 | 6_Vectorized | 12,272.6 | 67.6% | 13,470.3 | 43.9% | **1.10×** |
+| N = 1024 | 8 | 8_Warptiling | 12,963.4 | 71.4% | 12,733.4 | 41.5% | **0.98×** |
+| N = 1024 | 9 | 9_Double_Buffering | 12,953.4 | 71.3% | 19,904.6 | 64.9% | **1.54×** |
+| **N = 2048** | **0** | **cuBLAS** | 23,820.0 | 100.0% | 45,768.1 | 100.0% | **1.92×** |
+| N = 2048 | 1 | 1_Naive | 301.4 | 1.3% | 682.7 | 1.5% | **2.27×** |
+| N = 2048 | 2 | 2_GMEM_Coalescing | 2,299.7 | 9.7% | 5,554.6 | 12.1% | **2.42×** |
+| N = 2048 | 3 | 3_SMEM_Caching | 2,942.0 | 12.4% | 7,205.7 | 15.7% | **2.45×** |
+| N = 2048 | 4 | 4_1D_Blocktile | 7,650.6 | 32.1% | 15,200.3 | 33.2% | **1.99×** |
+| N = 2048 | 5 | 5_2D_Blocktile | 8,334.0 | 35.0% | 27,527.1 | 60.1% | **3.30×** |
+| N = 2048 | 6 | 6_Vectorized | 17,045.5 | 71.6% | 33,425.6 | 73.0% | **1.96×** |
+| N = 2048 | 8 | 8_Warptiling | 18,579.6 | 78.0% | 35,054.8 | 76.6% | **1.89×** |
+| N = 2048 | 9 | 9_Double_Buffering | 16,222.4 | 68.1% | 38,105.2 | 83.3% | **2.35×** |
+| **N = 4096** | **0** | **cuBLAS** | 24,383.8 | 100.0% | 45,437.6 | 100.0% | **1.86×** |
+| N = 4096 | 1 | 1_Naive | 301.5 | 1.2% | 683.4 | 1.5% | **2.27×** |
+| N = 4096 | 2 | 2_GMEM_Coalescing | 2,207.4 | 9.1% | 5,423.1 | 11.9% | **2.46×** |
+| N = 4096 | 3 | 3_SMEM_Caching | 2,959.2 | 12.1% | 7,180.1 | 15.8% | **2.43×** |
+| N = 4096 | 4 | 4_1D_Blocktile | 7,396.3 | 30.3% | 16,776.0 | 36.9% | **2.27×** |
+| N = 4096 | 5 | 5_2D_Blocktile | 8,784.0 | 36.0% | 27,354.7 | **60.2%** | **3.11×** |
+| N = 4096 | 6 | 6_Vectorized | 18,572.7 | 76.2% | 32,261.9 | 71.0% | **1.74×** |
+| N = 4096 | 8 | 8_Warptiling | **21,888.0** | **89.8%** | 36,773.0 | 80.9% | **1.68×** |
+| N = 4096 | 9 | 9_Double_Buffering | 18,105.1 | 74.3% | **37,688.8** | **82.9%** | **2.08×** |
 
 ---
 
