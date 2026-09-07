@@ -393,6 +393,20 @@ The 2D heatmap below illustrates the complete parametric landscape, capturing th
 
 ![Tile Landscape Heatmap](assets/plot_param_heatmap.png)
 
+#### Architectural Rationale for Unpopulated ("N/A") Heatmap Grid Points
+In the 2D block-tiling kernel template, execution geometry is governed by $\text{Threads per Block} = (BM / TM) \times (BN / TN)$. In symmetric configurations ($BN=BM, TN=TM$), this simplifies to $\text{Threads} = (BM / TM)^2$. The unpopulated cells (rendered as "N/A" with neutral gray backgrounds) represent grid points omitted due to fundamental hardware constraints and architectural degeneracy:
+
+1. **Hardware Ceiling Violation ($BM=256, TM=4$):**
+   Requires $(256/4)^2 = 64^2 = \mathbf{4,096 \text{ threads per block}}$. On all modern NVIDIA CUDA architectures, the maximum allowable hardware limit is **1,024 threads per block**. Attempting to launch this kernel triggers `cudaErrorInvalidConfiguration`; it is physically impossible to execute on CUDA hardware.
+2. **Sub-Warp Execution Degeneracy ($BM=32, TM=16$ & $BM=64, TM=16$):**
+   - For $(32, 16)$: $(32/16)^2 = 2^2 = \mathbf{4 \text{ threads per block}}$.
+   - For $(64, 16)$: $(64/16)^2 = 4^2 = \mathbf{16 \text{ threads per block}}$.
+   Because NVIDIA GPUs dispatch execution in lockstep warps of 32 threads, a 4-thread block leaves **28 out of 32 warp lanes permanently masked off (12.5% SIMD efficiency)**, while a 16-thread block runs at 50% lane waste. Both are severely degenerate and unable to hide memory or arithmetic pipeline latency.
+3. **Register Exhaustion & Spill Cliff ($BM=256, TM=16$):**
+   Computing a $16 \times 16$ tile requires 256 accumulator registers plus 32 operand registers ($A$ and $B$), totaling **288 registers per thread**, exceeding the strict hardware limit of **255 registers per thread** (`MAX_REGISTERS_PER_THREAD = 255`). This forces catastrophic register spilling to thread-local memory (DRAM).
+4. **Pruning of Known Degenerate Cliff ($BM=32, TM=4$):**
+   Since $(BM=32, TM=8)$ was measured at only $1,546.6 \text{ GFLOPS}$ due to severe under-occupancy and tile indexing overhead, decreasing thread tile size to $TM=4$ (which reduces register reuse without mitigating the under-occupancy bottleneck) was pruned as redundant.
+
 ---
 
 ## 5. Low-Level Microarchitectural Hardware Profiling & Bottleneck Analysis

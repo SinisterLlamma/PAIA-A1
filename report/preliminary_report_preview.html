@@ -1132,6 +1132,18 @@
 <figure>
 <img src="assets/plot_param_heatmap.png" alt="" /><figcaption>Tile Landscape Heatmap</figcaption>
 </figure>
+<h4 id="architectural-rationale-for-unpopulated-na-heatmap-grid-points">Architectural Rationale for Unpopulated (“N/A”) Heatmap Grid Points</h4>
+<p>In the 2D block-tiling kernel template, execution geometry is governed by <span class="math inline">\(\text{Threads per Block} = (BM / TM) \times (BN / TN)\)</span>. In symmetric configurations (<span class="math inline">\(BN=BM, TN=TM\)</span>), this simplifies to <span class="math inline">\(\text{Threads} = (BM / TM)^2\)</span>. The unpopulated cells (rendered as “N/A” with neutral gray backgrounds) represent grid points omitted due to fundamental hardware constraints and architectural degeneracy:</p>
+<ol type="1">
+<li><strong>Hardware Ceiling Violation (<span class="math inline">\(BM=256, TM=4\)</span>):</strong> Requires <span class="math inline">\((256/4)^2 = 64^2 = \mathbf{4,096 \text{ threads per block}}\)</span>. On all modern NVIDIA CUDA architectures, the maximum allowable hardware limit is <strong>1,024 threads per block</strong>. Attempting to launch this kernel triggers <code>cudaErrorInvalidConfiguration</code>; it is physically impossible to execute on CUDA hardware.</li>
+<li><strong>Sub-Warp Execution Degeneracy (<span class="math inline">\(BM=32, TM=16\)</span> &amp; <span class="math inline">\(BM=64, TM=16\)</span>):</strong>
+<ul>
+<li>For <span class="math inline">\((32, 16)\)</span>: <span class="math inline">\((32/16)^2 = 2^2 = \mathbf{4 \text{ threads per block}}\)</span>.</li>
+<li>For <span class="math inline">\((64, 16)\)</span>: <span class="math inline">\((64/16)^2 = 4^2 = \mathbf{16 \text{ threads per block}}\)</span>. Because NVIDIA GPUs dispatch execution in lockstep warps of 32 threads, a 4-thread block leaves <strong>28 out of 32 warp lanes permanently masked off (12.5% SIMD efficiency)</strong>, while a 16-thread block runs at 50% lane waste. Both are severely degenerate and unable to hide memory or arithmetic pipeline latency.</li>
+</ul></li>
+<li><strong>Register Exhaustion &amp; Spill Cliff (<span class="math inline">\(BM=256, TM=16\)</span>):</strong> Computing a <span class="math inline">\(16 \times 16\)</span> tile requires 256 accumulator registers plus 32 operand registers (<span class="math inline">\(A\)</span> and <span class="math inline">\(B\)</span>), totaling <strong>288 registers per thread</strong>, exceeding the strict hardware limit of <strong>255 registers per thread</strong> (<code>MAX_REGISTERS_PER_THREAD = 255</code>). This forces catastrophic register spilling to thread-local memory (DRAM).</li>
+<li><strong>Pruning of Known Degenerate Cliff (<span class="math inline">\(BM=32, TM=4\)</span>):</strong> Since <span class="math inline">\((BM=32, TM=8)\)</span> was measured at only <span class="math inline">\(1,546.6 \text{ GFLOPS}\)</span> due to severe under-occupancy and tile indexing overhead, decreasing thread tile size to <span class="math inline">\(TM=4\)</span> (which reduces register reuse without mitigating the under-occupancy bottleneck) was pruned as redundant.</li>
+</ol>
 <hr />
 <h2 id="low-level-microarchitectural-hardware-profiling-bottleneck-analysis">5. Low-Level Microarchitectural Hardware Profiling &amp; Bottleneck Analysis</h2>
 <p>To move beyond wall-clock execution timing and understand the exact physical resource limitations of the NVIDIA Ampere GA102 architecture (RTX 3090), we present a comprehensive microarchitectural profiling analysis. This section quantifies memory hierarchy utilization, register allocation pressure, global memory coalescing efficiency, and shared memory bank conflict mechanics across all progressive optimization stages.</p>
