@@ -165,11 +165,85 @@ In this framework, all kernels incorporate **universal dynamic boundary clamps a
 | **6** | **6_Vectorized** | **10,265.9** | **4,844.1** | **11,405.0** | 159.9 | **PASS** ($< 10^{-4}$) |
 | **8** | **8_Warptiling** | 4,987.0 | 2,913.4 | 5,716.2 | 101.1 | **PASS** ($< 10^{-4}$) |
 | **9** | **9_Double_Buffering** | 5,282.1 | 2,915.7 | 5,845.4 | 100.5 | **PASS** ($< 10^{-4}$) |
+| **10** | **10_Transpose** | 756.1 | 477.2 | 752.4 | 115.1 | **PASS** ($< 10^{-4}$) |
+| **11** | **11_Recursive_Tile** | 2,902.7 | 2,315.0 | 2,981.4 | **343.8** | **PASS** ($< 10^{-4}$) |
 
 #### Architectural Observations on Dimension Scaling
 1. **Vectorized Robustness (Kernel 6):** Maintains strong throughput across non-power-of-two sizes ($11,405.0 \text{ GFLOPS}$ on $3000^3$), proving that 128-bit memory instructions can be successfully combined with dynamic edge masking without sacrificing vectorized bus efficiency.
-2. **Small / Odd Matrix Quantization ($127^3$):** For $M=N=K=127$, the entire matrix multiplication comprises only $\approx 4.1 \text{ MFLOPs}$. Launching a $128 \times 128$ block tile produces only **1 single thread block**, utilizing only **1 of the 82 SMs** on the RTX 3090 ($1.2\%$ hardware utilization). In this latency-dominated regime, simpler kernels with lower synchronization overhead (Kernel 2 at $303.1 \text{ GFLOPS}$) actually outperform complex warp-tiled pipelines.
+2. **Small / Odd Matrix Quantization ($127^3$):** For $M=N=K=127$, the entire matrix multiplication comprises only $\approx 4.1 \text{ MFLOPs}$. Launching a $128 \times 128$ block tile produces only **1 single thread block**, utilizing only **1 of the 82 SMs** on the RTX 3090 ($1.2\%$ hardware utilization). In this latency-dominated regime, simpler kernels with lower synchronization overhead (Kernel 11 at $343.8 \text{ GFLOPS}$ and Kernel 2 at $303.1 \text{ GFLOPS}$) significantly outperform complex warp-tiled pipelines ($101.1 \text{ GFLOPS}$) and cuBLAS ($87.4 \text{ GFLOPS}$).
 3. **Correctness Guarantee:** Across 121 automated unit tests spanning $64^3 \dots 1024^3$, $128 \times 256 \times 512$, $300 \times 150 \times 300$, $1000 \times 500 \times 750$, and primes $127^3, 255^3, 513^3$, all kernels achieved **100% test pass rates** ($|C_{\text{CUDA}} - C_{\text{cuBLAS}}| < 10^{-4}$).
+
+---
+
+### 3.3 Alternative Matrix Multiplication Algorithms & Special Cases ("Other Options")
+
+To explore alternative algorithmic avenues beyond canonical rectangular spatial tiling, we evaluated alternative matrix multiplication paradigms, measuring their performance on the RTX 3090 and identifying specific architectural regimes where alternative approaches outperform standard 2D warp-tiled GEMM.
+
+#### 1. Implemented Alternative Approaches
+
+1. **Transpose-then-Multiply (`10_Transpose`):**
+   - **Algorithmic Formulation:** Out-of-place transposition of matrix $B$ ($K \times N \to N \times K$) into an auxiliary buffer $B^T$, followed by a matrix multiplication kernel where both $A$ and $B^T$ are read along contiguous row addresses ($A[\text{row} \times K + k]$ and $B^T[\text{col} \times K + k]$).
+   - **Transpose Kernel Optimization:** Transposition is performed via a 2D coalesced kernel with bank-conflict-free shared memory padding (`__shared__ float tile[32][33]`), eliminating the 32-way bank serialization inherent to naive matrix transposes.
+   - **Empirical Throughput:** Delivers $284.3 \text{ GFLOPS}$ ($N=1024$), $298.9 \text{ GFLOPS}$ ($N=2048$), and $302.8 \text{ GFLOPS}$ ($N=4096$).
+   - **Microarchitectural Bottlenecks:** Although row-strided reads eliminate the uncoalesced column stride of naive GEMM, the subsequent matmul kernel performs direct global memory reads for each dot product without register or shared-memory data reuse ($AI = 0.17 \text{ FLOPs/byte}$). It remains strictly DRAM-bandwidth bound. Furthermore, performing an out-of-place transposition on-the-fly at runtime incurs an auxiliary $O(K \times N)$ GMEM read and write pass.
+
+2. **Hierarchical Recursive / Cache-Oblivious Tiling (`11_Recursive_Tile`):**
+   - **Algorithmic Formulation:** Decomposes the $M \times N \times K$ compute volume into hierarchical sub-blocks using double-buffered shared memory tiles (`As[2][TILE][TILE]` and `Bs[2][TILE][TILE]`, $\text{TILE}=32$).
+   - **Pipeline Structure:** Implements a ping-pong buffer index `cur = 1 - cur` to asynchronously prefetch tile $(t+1)$ while computing tile $t$ from shared memory, overlapping GMEM transfer latency with math execution.
+   - **Empirical Throughput:** Delivers consistent throughput of $3,022.8 \text{ GFLOPS}$ ($N=1024$), $3,001.2 \text{ GFLOPS}$ ($N=2048$), and $2,990.5 \text{ GFLOPS}$ ($N=4096$).
+   - **Microarchitectural Bottlenecks:** Double-buffered recursive tiling achieves performance comparable to Kernel 3 (`3_SMEM_Caching`, $2,959.2 \text{ GFLOPS}$) without complex thread coarsening, but plateaus because each thread computes only a single scalar element ($TM=TN=1$). Arithmetic pipeline latency remains exposed without register-level ILP.
+
+---
+
+#### 2. Special Cases Where Alternative Approaches Are Faster / Better
+
+Are there special matrix shapes or application regimes where alternative algorithms outperform standard 2D warp-tiled GEMM? **Yes.** Our empirical micro-benchmarking uncovers four distinct regimes:
+
+| Special Case / Application Regime | Matrix Dimensions ($M \times N \times K$) | Standard Warp-Tiled (K8) | Optimal Alternative Approach | Alternative Throughput | Speedup vs Standard Warp-Tiled | Architectural Root Cause |
+| :--- | :--- | :---: | :--- | :---: | :---: | :--- |
+| **Small Square Matrices (Quantization Dominated)** | $64 \times 64 \times 64$ | 23.4 GFLOPS | **Recursive Tiled (K11)** | **70.1 GFLOPS** | **3.00×** (beats cuBLAS: 57.4 GFLOPS) | A $128 \times 128$ tile produces only 1 block with 75% idle threads; $32 \times 32$ tiles produce 4 blocks with minimal sync latency. |
+| **Odd Prime Dimensions** | $127 \times 127 \times 127$ | 101.1 GFLOPS | **Recursive Tiled (K11)** | **343.8 GFLOPS** | **3.40×** (beats cuBLAS: 87.4 GFLOPS) | Minimal boundary padding overhead and lightweight synchronization on non-aligned grids. |
+| **Tall-and-Skinny / Matrix-Vector (LLM Decoding)** | $1 \times 4096 \times 4096$ | 30.9 GFLOPS | **Split-K GEMM / GEMV (cuBLAS)** | **381.9 GFLOPS** | **12.35×** | $M=1$ produces only 32 blocks, leaving 50 of 82 SMs idle. Split-K parallelizes over $K$, saturating all SMs. |
+| **Moderately Skinny Matrix** | $16 \times 4096 \times 4096$ | 487.1 GFLOPS | **Split-K GEMM (cuBLAS)** | **5,254.0 GFLOPS** | **10.79×** | Extreme wave quantization under 2D spatial tiling; Split-K restores full grid occupancy. |
+| **Offline Weight-Stationary Inference** | $4096 \times 4096 \times 4096$ | N/A (Online Transpose) | **Pre-Transposed $B^T$ (Amortized)** | Eliminates 100% of runtime transpose overhead | N/A | Transposition cost $O(K \times N)$ paid once offline; all inference passes stream coalesced rows. |
+
+##### Case 1: Small Matrices & Tail Quantization ($M, N, K \le 128$)
+In Transformer multi-head self-attention, projection dimensions are frequently small ($d_k = 64$ or $128$). When launching a high-performance $128 \times 128$ warp-tiled kernel on $M=N=K=64$, the grid consists of exactly **1 thread block**. 
+- 81 of the 82 SMs on the RTX 3090 remain completely idle ($1.2\%$ hardware occupancy).
+- Within the single active thread block, three-quarters of the threads are masked out by boundary clamping guards.
+- **Empirical Result:** Kernel 8 achieves only **$23.35 \text{ GFLOPS}$**. 
+- In contrast, Kernel 11 (`11_Recursive_Tile`, $32 \times 32$ block) launches 4 blocks with lightweight synchronization, reaching **$70.14 \text{ GFLOPS}$** (3.0× faster than Kernel 8, and outperforming cuBLAS at $57.39 \text{ GFLOPS}$).
+- **Optimal Production Solution:** **Batched GEMM (`cublasGemmStridedBatched`)**, which schedules hundreds of independent small GEMMs across SMs simultaneously, or persistent single-warp GEMM kernels where each warp computes an entire $64 \times 64$ product entirely within registers.
+
+##### Case 2: Tall-and-Skinny / Vector-Matrix Multiply ($M \ll N, K$ or $M=1$) — The Need for Split-K
+During autoregressive LLM token generation (e.g., LLaMA, GPT-4), the batch size per stream is $M=1$ with hidden dimension $K=4096$ and vocabulary/projection $N=4096$.
+- Under conventional 2D output-space tiling ($BM=128, BN=128$), the grid dimensions are $\lceil 1/128 \rceil \times \lceil 4096/128 \rceil = 1 \times 32 = 32$ blocks.
+- On an 82-SM Ampere GA102 GPU, **50 SMs (61%) sit completely unallocated**.
+- **Empirical Result:** Kernel 8 collapses to **$30.93 \text{ GFLOPS}$** ($1.085 \text{ ms}$). Even naive coalesced GEMM (Kernel 2) outperforms it at **$88.76 \text{ GFLOPS}$** ($0.378 \text{ ms}$) due to having 4× more thread blocks.
+- **Why Split-K Wins:** cuBLAS achieves **$381.91 \text{ GFLOPS}$** ($0.088 \text{ ms}$, a **12.3× speedup** over Kernel 8) by dynamically switching to a **Split-K algorithm**. Instead of tiling only $M$ and $N$, Split-K divides the reduction dimension $K$ into $S$ slices (e.g., $S=16$), launching $32 \times 16 = 512$ thread blocks that execute concurrently across all 82 SMs. Each block computes a partial dot product and accumulates into global memory using a parallel tree reduction or `atomicAdd`.
+
+##### Case 3: Offline Amortized Transpose (Weight-Stationary Deep Learning)
+In neural network inference (MLP layers, linear projections), the weight matrix $W$ ($K \times N$) is static across millions of user queries. 
+- In Kernel 10, running `transpose_kernel` dynamically during every forward pass is inefficient ($302.8 \text{ GFLOPS}$) because the transposition step consumes memory bandwidth without performing useful arithmetic.
+- However, if the weights are pre-transposed **offline at model loading time** ($W \to W^T$), the runtime kernel evaluates $Y = X \times (W^T)^T = X \cdot W^T$. In this layout, memory accesses to both activations $X$ and weights $W^T$ are perfectly unit-strided along consecutive threads, allowing vector loads (`float4`) without any in-kernel transposition or shared-memory bank padding overhead.
+
+##### Case 4: Asymptotic Sub-Cubic Complexity (Strassen & Winograd $O(N^{2.807})$)
+Strassen's algorithm reduces the number of recursive block multiplications from 8 to 7, reducing algorithmic complexity from $O(N^3)$ to $O(N^{\log_2 7}) \approx O(N^{2.807})$. 
+- *Why Strassen is not practical for standard GPU SGEMM ($N \le 4096$):*
+  1. **Memory Bandwidth Bottleneck:** Strassen requires 18 matrix addition/subtraction passes ($O(N^2)$ streaming operations) to prepare intermediate matrices. On modern GPUs, memory bandwidth is scarce ($AI_{\text{ridge}} = 38.0 \text{ FLOPs/byte}$). Adding memory-bound addition kernels degrades end-to-end runtime.
+  2. **Memory Footprint:** Recursive sub-matrices require large intermediate scratchpad allocations in VRAM ($O(N^2)$ auxiliary storage).
+  3. **Loss of Vectorization & Hardware Locality:** Breaking regular contiguous power-of-two tiles into irregular recursive partitions destroys hardware memory coalescing and Tensor Core alignment.
+  4. **Empirical Crossover:** Research literature (e.g., Huang et al., *SC16*) demonstrates that on NVIDIA GPUs, Strassen only overtakes vendor-tuned GEMM when $N > 16,384$ and with highly specialized fused addition kernels.
+
+##### Case 5: Hardware Tensor Cores (NVIDIA Ampere WMMA / `mma.sync`)
+All 11 software kernels in this study target the FP32 CUDA cores (ALUs). However, the NVIDIA Ampere GA102 architecture includes **328 3rd-Generation Tensor Cores**.
+- Using Warp-Level Matrix Multiply and Accumulate (`nvcuda::wmma` or PTX `mma.sync.aligned.m16n8k16.row.col`), a single warp can multiply $16 \times 16 \times 16$ matrix fragments directly in hardware in a single clock cycle.
+- While pure FP32 CUDA cores peak at **35.58 TFLOPS**, Tensor Cores provide:
+  - **TF32 (TensorFloat-32):** $142.3 \text{ TFLOPS}$ (4× speedup over FP32 peak)
+  - **FP16 / BF16 (FP32 Accumulate):** $284.6 \text{ TFLOPS}$ (8× speedup over FP32 peak)
+- For mixed-precision AI workloads, Tensor Core MMA is fundamentally superior to any SIMT CUDA core optimization.
+
+---
 
 ## 4. Visual Analysis & Microarchitectural Plots
 
