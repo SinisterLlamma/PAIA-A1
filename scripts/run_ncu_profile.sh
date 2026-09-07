@@ -31,40 +31,38 @@ if [ ! -f "$BENCHMARK" ]; then
     make -C "$PROJECT_DIR" benchmark
 fi
 
-# Check if ncu is available
-if ! command -v ncu &>/dev/null; then
-    echo "ERROR: ncu (Nsight Compute) not found in PATH"
-    echo "Install it from: https://developer.nvidia.com/nsight-compute"
+# Find ncu binary
+NCU_BIN=""
+if command -v ncu &>/dev/null; then
+    NCU_BIN="ncu"
+elif [ -x "/opt/nvidia/nsight-compute/2024.3.2/ncu" ]; then
+    NCU_BIN="/opt/nvidia/nsight-compute/2024.3.2/ncu"
+elif [ -x "/usr/local/cuda-12.6/bin/ncu" ]; then
+    NCU_BIN="/usr/local/cuda-12.6/bin/ncu"
+else
+    echo "ERROR: ncu (Nsight Compute) not found."
     exit 1
 fi
+echo "Using NCU binary: $NCU_BIN"
 
 # Metrics to collect
 METRICS="sm__throughput.avg.pct_of_peak_sustained_elapsed"
 METRICS+=",dram__throughput.avg.pct_of_peak_sustained_elapsed"
-METRICS+=",l1tex__t_bytes_pipe_lsu_mem_global_op_ld.sum.per_second"
-METRICS+=",l1tex__t_bytes_pipe_lsu_mem_global_op_st.sum.per_second"
-METRICS+=",lts__t_sectors_op_read.sum"
-METRICS+=",lts__t_sectors_op_write.sum"
 METRICS+=",lts__t_sector_hit_rate.pct"
 METRICS+=",l1tex__t_sector_hit_rate.pct"
 METRICS+=",l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_ld.sum"
 METRICS+=",l1tex__data_bank_conflicts_pipe_lsu_mem_shared_op_st.sum"
 METRICS+=",launch__registers_per_thread"
 METRICS+=",sm__warps_active.avg.pct_of_peak_sustained_active"
-METRICS+=",sm__sass_thread_inst_executed_op_fadd_pred_on.sum"
-METRICS+=",sm__sass_thread_inst_executed_op_fmul_pred_on.sum"
-METRICS+=",sm__sass_thread_inst_executed_op_ffma_pred_on.sum"
-METRICS+=",dram__bytes_read.sum"
-METRICS+=",dram__bytes_write.sum"
 
-# Size for profiling (smaller to keep ncu runs manageable)
-PROF_M=1024
-PROF_N=1024
-PROF_K=1024
+# Size for profiling (512x512 keeps ncu multi-pass runs very fast)
+PROF_M=512
+PROF_N=512
+PROF_K=512
 
 # CSV header for summary
 NCU_SUMMARY="$RESULTS_DIR/ncu_metrics.csv"
-echo "gpu,kernel_id,kernel_name,M,N,K,sm_throughput_pct,dram_throughput_pct,l2_hit_rate_pct,l1_hit_rate_pct,bank_conflicts_ld,bank_conflicts_st,registers_per_thread,occupancy_pct,dram_bytes_read,dram_bytes_write" > "$NCU_SUMMARY"
+echo "gpu,kernel_id,kernel_name,M,N,K,sm_throughput_pct,dram_throughput_pct,l2_hit_rate_pct,l1_hit_rate_pct,bank_conflicts_ld,bank_conflicts_st,registers_per_thread,occupancy_pct" > "$NCU_SUMMARY"
 
 KERNEL_NAMES=("cuBLAS" "1_Naive" "2_GMEM_Coalescing" "3_SMEM_Caching" "4_1D_Blocktile" "5_2D_Blocktile" "6_Vectorized" "7_Bank_Extra_Col" "8_Warptiling" "9_Double_Buffering" "10_Transpose" "11_Recursive_Tile")
 
@@ -73,22 +71,17 @@ for kid in 0 1 2 3 4 5 6 7 8 9 10 11; do
     echo ""
     echo ">>> Profiling kernel $kid: $kname"
 
-    NCU_REPORT="$NCU_DIR/kernel_${kid}_${kname}.ncu-rep"
+    NCU_REPORT="$NCU_DIR/kernel_${kid}_${kname}"
     NCU_CSV="$NCU_DIR/kernel_${kid}_${kname}.csv"
 
-    # Run ncu - profile only 1 run, skip warmup kernels
-    # --kernel-id selects which kernel launch to profile
-    # We profile the last kernel launch (the actual benchmark, not warmup)
-    ncu --set full \
+    "$NCU_BIN" \
         --metrics "$METRICS" \
         --csv \
         --target-processes all \
-        --export "$NCU_REPORT" \
+        -f -o "$NCU_REPORT" \
         "$BENCHMARK" -k "$kid" -m "$PROF_M" -n "$PROF_N" -k_dim "$PROF_K" --warmup 0 --runs 1 \
-        2>/dev/null \
-        > "$NCU_CSV" || {
-            echo "  WARNING: ncu failed for kernel $kid. Try running with sudo."
-            echo "  sudo ncu ... or: sudo modprobe nvidia NVreg_RestrictProfilingToAdminUsers=0"
+        > "$NCU_CSV" 2>&1 || {
+            echo "  WARNING: ncu failed for kernel $kid."
             continue
         }
 
@@ -103,10 +96,7 @@ for kid in 0 1 2 3 4 5 6 7 8 9 10 11; do
         BC_ST=$(grep "bank_conflicts.*op_st" "$NCU_CSV" | tail -1 | awk -F',' '{print $NF}' | tr -d '"' || echo "0")
         REGS=$(grep "registers_per_thread" "$NCU_CSV" | tail -1 | awk -F',' '{print $NF}' | tr -d '"' || echo "N/A")
         OCC=$(grep "warps_active.*pct" "$NCU_CSV" | tail -1 | awk -F',' '{print $NF}' | tr -d '"' || echo "N/A")
-        DRAM_R=$(grep "dram__bytes_read" "$NCU_CSV" | tail -1 | awk -F',' '{print $NF}' | tr -d '"' || echo "N/A")
-        DRAM_W=$(grep "dram__bytes_write" "$NCU_CSV" | tail -1 | awk -F',' '{print $NF}' | tr -d '"' || echo "N/A")
-
-        echo "$GPU_NAME,$kid,$kname,$PROF_M,$PROF_N,$PROF_K,$SM_TP,$DRAM_TP,$L2_HR,$L1_HR,$BC_LD,$BC_ST,$REGS,$OCC,$DRAM_R,$DRAM_W" >> "$NCU_SUMMARY"
+        echo "$GPU_NAME,$kid,$kname,$PROF_M,$PROF_N,$PROF_K,$SM_TP,$DRAM_TP,$L2_HR,$L1_HR,$BC_LD,$BC_ST,$REGS,$OCC" >> "$NCU_SUMMARY"
         echo "  ✓ Saved: $NCU_CSV"
     fi
 done
