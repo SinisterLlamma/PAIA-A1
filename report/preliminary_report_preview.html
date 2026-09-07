@@ -166,12 +166,11 @@
   <article class="markdown-body">
     <h1 id="comprehensive-performance-analysis-of-cuda-matrix-multiplication-across-gpu-microarchitectures">Comprehensive Performance Analysis of CUDA Matrix Multiplication Across GPU Microarchitectures</h1>
 <p><strong>Assignment 1: Preliminary Technical Report</strong><br />
-<strong>Author:</strong> Eshaan &amp; Harsha (SinisterLlamma / PAIA-A1)<br />
-<strong>Target Hardware:</strong> NVIDIA GeForce RTX 3090 (Ampere GA102, Compute Capability 8.6)<br />
+<strong>Author:</strong> Eshaan <strong>Target Hardware:</strong> NVIDIA GeForce RTX 3090 (Ampere GA102, Compute Capability 8.6)<br />
 <strong>Primary Reference:</strong> Simon Boehm, <em>“How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance”</em> (<code>siboehm/SGEMM_CUDA</code>)<br />
 <strong>Repository:</strong> <a href="https://github.com/SinisterLlamma/PAIA-A1">https://github.com/SinisterLlamma/PAIA-A1</a></p>
 <hr />
-<h2 id="executive-summary">Executive Summary</h2>
+<h2 id="summary">Summary</h2>
 <p>Matrix Multiplication (<span class="math inline">\(C = \alpha AB + \beta C\)</span>, specifically Single-Precision GEMM / SGEMM) is the fundamental computational primitive underpinning modern deep learning systems, scientific computing, and computer vision pipelines. While modern GPU architectures deliver theoretical peak compute performance in excess of tens of teraflops, naive CUDA implementations typically extract less than <span class="math inline">\(2\%\)</span> of this computational capacity due to severe memory latency, uncoalesced bus transactions, and pipeline stalls.</p>
 <h3 id="key-highlights">Key Highlights</h3>
 <ul>
@@ -1417,7 +1416,7 @@
 <p>In Kernel 8 (<code>8_Warptiling</code>), bank conflict mitigation is taken one step further through spatial partitioning: - Matrix <span class="math inline">\(A\)</span> is loaded into <span class="math inline">\(A_s\)</span> in transposed format (<span class="math inline">\(BM \times BK = 128 \times 8\)</span>). - Warps are assigned distinct non-overlapping <span class="math inline">\(64 \times 64\)</span> sub-tiles within the shared memory block. - Each warp accesses localized contiguous registers and dedicated sub-warp shared memory segments, eliminating inter-warp contention on the shared memory crossbar and achieving <strong><span class="math inline">\(89.8\%\)</span> of cuBLAS throughput</strong> with zero bank conflicts.</p>
 <hr />
 <h2 id="multi-architecture-execution-cross-gpu-scaling-nvidia-rtx-3090-vs.-nvidia-l40s">6. Multi-Architecture Execution &amp; Cross-GPU Scaling (NVIDIA RTX 3090 vs. NVIDIA L40S)</h2>
-<p>To evaluate architectural scaling across heterogeneous NVIDIA microarchitectures as stipulated by the assignment specification, we performed cross-architectural benchmarking comparing our primary workstation GPU (<strong>NVIDIA GeForce RTX 3090</strong>, Ampere GA102, Compute Capability 8.6) against an enterprise datacenter accelerator (<strong>NVIDIA L40S</strong>, Ada Lovelace AD102, Compute Capability 8.9, benchmarked on identical matrix dimensions via partner repository dataset <code>i-am-space/PAIA-A1</code>).</p>
+<p>To evaluate architectural scaling across heterogeneous NVIDIA microarchitectures as stipulated by the assignment specification, we performed cross-architectural benchmarking comparing our primary workstation GPU (<strong>NVIDIA GeForce RTX 3090</strong>, Ampere GA102, Compute Capability 8.6) against an enterprise datacenter accelerator (<strong>NVIDIA L40S</strong>, Ada Lovelace AD102, Compute Capability 8.9).</p>
 <hr />
 <h3 id="architectural-specification-machine-balance-comparison">6.1 Architectural Specification &amp; Machine Balance Comparison</h3>
 <p>The transition from Ampere (GA102) to Ada Lovelace (AD102) represents a substantial architectural leap in streaming multiprocessor density, clock frequencies, and memory hierarchy topology:</p>
@@ -1518,7 +1517,7 @@
 </tbody>
 </table>
 <blockquote>
-<p>[!IMPORTANT] <strong>The Ada Lovelace Ridge Point Divergence:</strong> On Ampere (RTX 3090), the machine balance is <span class="math inline">\(38.0 \text{ FLOPs/byte}\)</span>, meaning any kernel achieving an arithmetic intensity above 38 FLOPs/byte becomes compute-bound. On Ada Lovelace (L40S), peak compute expanded by <strong>2.57×</strong> while external DRAM bandwidth <em>contracted</em> by <strong>7.7%</strong> (GDDR6 without PAM4 signaling), elevating the ridge point to <strong>106.0 FLOPs/byte</strong>. To offset this severe off-chip bandwidth bottleneck, NVIDIA expanded the on-chip L2 cache by <strong>16× (96 MB)</strong>, fundamentally altering memory hierarchy dynamics.</p>
+<p><strong>The Ada Lovelace Ridge Point Divergence:</strong> On Ampere (RTX 3090), the machine balance is <span class="math inline">\(38.0 \text{ FLOPs/byte}\)</span>, meaning any kernel achieving an arithmetic intensity above 38 FLOPs/byte becomes compute-bound. On Ada Lovelace (L40S), peak compute expanded by <strong>2.57×</strong> while external DRAM bandwidth <em>contracted</em> by <strong>7.7%</strong> (GDDR6 without PAM4 signaling), elevating the ridge point to <strong>106.0 FLOPs/byte</strong>. To offset this severe off-chip bandwidth bottleneck, NVIDIA expanded the on-chip L2 cache by <strong>16× (96 MB)</strong>, fundamentally altering memory hierarchy dynamics.</p>
 </blockquote>
 <hr />
 <h3 id="empirical-cross-gpu-performance-across-dimensions-n1024-2048-4096">6.2 Empirical Cross-GPU Performance Across Dimensions (<span class="math inline">\(N=1024, 2048, 4096\)</span>)</h3>
@@ -1854,24 +1853,7 @@
 <h4 id="memory-bound-baselines-dram-bandwidth-inversion">4. Memory-Bound Baselines &amp; DRAM Bandwidth Inversion</h4>
 <p>In Kernel 1 (Naive) and Kernel 2 (Coalesced): - The speedup from RTX 3090 to L40S is approximately <span class="math inline">\(2.27×\text{--}2.46×\)</span>. - However, since L40S external memory bandwidth is actually <strong>lower</strong> than RTX 3090 (<span class="math inline">\(864.0 \text{ GB/s}\)</span> vs. <span class="math inline">\(936.2 \text{ GB/s}\)</span>), why does naive SGEMM run faster? - The answer lies in the <strong>L1/L2 cache hit rate</strong>: even uncoalesced memory requests benefit from the massive 96 MB L2 cache, which filters duplicate uncoalesced sector loads that would otherwise saturate the external memory controller.</p>
 <hr />
-<h3 id="automated-multi-gpu-execution-protocol">6.5 Automated Multi-GPU Execution Protocol</h3>
-<p>To reproduce these benchmarks on any connected NVIDIA GPU architecture (e.g., Turing <code>sm_75</code>, Ampere <code>sm_80</code>/<code>sm_86</code>, Ada Lovelace <code>sm_89</code>, Hopper <code>sm_90</code>):</p>
-<div class="sourceCode" id="cb5"><pre class="sourceCode bash"><code class="sourceCode bash"><span id="cb5-1"><a href="#cb5-1" aria-hidden="true"></a><span class="co"># 1. Compile the suite (automatically detects host GPU compute capability)</span></span>
-<span id="cb5-2"><a href="#cb5-2" aria-hidden="true"></a><span class="fu">make</span> all</span>
-<span id="cb5-3"><a href="#cb5-3" aria-hidden="true"></a></span>
-<span id="cb5-4"><a href="#cb5-4" aria-hidden="true"></a><span class="co"># 2. Run automated validation suite (verifies correctness against cuBLAS across 121 configurations)</span></span>
-<span id="cb5-5"><a href="#cb5-5" aria-hidden="true"></a><span class="ex">./build/validate</span></span>
-<span id="cb5-6"><a href="#cb5-6" aria-hidden="true"></a></span>
-<span id="cb5-7"><a href="#cb5-7" aria-hidden="true"></a><span class="co"># 3. Run complete benchmark sweep and parameter sensitivity</span></span>
-<span id="cb5-8"><a href="#cb5-8" aria-hidden="true"></a><span class="ex">./scripts/run_benchmarks.sh</span></span>
-<span id="cb5-9"><a href="#cb5-9" aria-hidden="true"></a></span>
-<span id="cb5-10"><a href="#cb5-10" aria-hidden="true"></a><span class="co"># 4. Generate standalone GPU publication plots</span></span>
-<span id="cb5-11"><a href="#cb5-11" aria-hidden="true"></a><span class="ex">python3</span> analysis/plot_results.py results/<span class="va">$(</span><span class="fu">cat</span> results/current_gpu.txt<span class="va">)</span>/ --save</span>
-<span id="cb5-12"><a href="#cb5-12" aria-hidden="true"></a></span>
-<span id="cb5-13"><a href="#cb5-13" aria-hidden="true"></a><span class="co"># 5. Generate comparative multi-architecture plots (across all profiled GPUs in results/)</span></span>
-<span id="cb5-14"><a href="#cb5-14" aria-hidden="true"></a><span class="ex">python3</span> analysis/compare_gpus.py results/ --save</span></code></pre></div>
-<hr />
-<h2 id="preliminary-conclusions-future-roadmap">7. Preliminary Conclusions &amp; Future Roadmap</h2>
+<h2 id="preliminary-conclusions">7. Preliminary Conclusions</h2>
 <h3 id="conclusions">Conclusions</h3>
 <ol type="1">
 <li><strong>Memory Hierarchy Dominance:</strong> Naive matrix multiplication is bottlenecked by global memory bandwidth and transaction fragmentation (<span class="math inline">\(1.2\%\)</span> efficiency). Addressing coalescing and shared memory caching provides an immediate order-of-magnitude improvement (<span class="math inline">\(12.1\%\)</span>).</li>
@@ -1879,12 +1861,6 @@
 <li><strong>Warp-Level Scheduling Reaches cuBLAS Parity:</strong> Hierarchical warp tiling achieves <strong><span class="math inline">\(89.8\%\)</span> of cuBLAS throughput (21,888 GFLOPS)</strong> on FP32 non-Tensor Core units, confirming Simon Boehm’s foundational thesis.</li>
 <li><strong>Hardware Pipeline Overlap:</strong> Ampere <code>cp.async</code> delivers clean latency hiding without register overhead.</li>
 </ol>
-<h3 id="next-steps-for-final-report">Next Steps for Final Report</h3>
-<ul>
-<li>Execute identical automated sweeps on Hopper (H100, SM 90a) and Blackwell (B200, SM 100) to evaluate architecture-specific asynchronous pipeline and TMA (Tensor Memory Accelerator) scaling.</li>
-<li>Integrate Tensor Core WMMA / MMA instructions (<code>mma.sync.aligned.m16n8k8.row.col</code>) to investigate FP16/TF32 tensor acceleration exceeding 100+ TFLOPS.</li>
-<li>Correlate Nsight Compute hardware performance counters with theoretical memory transaction models across architectures.</li>
-</ul>
 
   </article>
   <script>

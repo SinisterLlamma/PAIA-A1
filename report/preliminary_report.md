@@ -1,13 +1,13 @@
 # Comprehensive Performance Analysis of CUDA Matrix Multiplication Across GPU Microarchitectures
 **Assignment 1: Preliminary Technical Report**  
-**Author:** Eshaan & Harsha (SinisterLlamma / PAIA-A1)  
+**Author:** Eshaan 
 **Target Hardware:** NVIDIA GeForce RTX 3090 (Ampere GA102, Compute Capability 8.6)  
 **Primary Reference:** Simon Boehm, *"How to Optimize a CUDA Matmul Kernel for cuBLAS-like Performance"* (`siboehm/SGEMM_CUDA`)  
 **Repository:** [https://github.com/SinisterLlamma/PAIA-A1](https://github.com/SinisterLlamma/PAIA-A1)
 
 ---
 
-## Executive Summary
+## Summary
 
 Matrix Multiplication ($C = \alpha AB + \beta C$, specifically Single-Precision GEMM / SGEMM) is the fundamental computational primitive underpinning modern deep learning systems, scientific computing, and computer vision pipelines. While modern GPU architectures deliver theoretical peak compute performance in excess of tens of teraflops, naive CUDA implementations typically extract less than $2\%$ of this computational capacity due to severe memory latency, uncoalesced bus transactions, and pipeline stalls.
 
@@ -612,7 +612,7 @@ In Kernel 8 (`8_Warptiling`), bank conflict mitigation is taken one step further
 
 ## 6. Multi-Architecture Execution & Cross-GPU Scaling (NVIDIA RTX 3090 vs. NVIDIA L40S)
 
-To evaluate architectural scaling across heterogeneous NVIDIA microarchitectures as stipulated by the assignment specification, we performed cross-architectural benchmarking comparing our primary workstation GPU (**NVIDIA GeForce RTX 3090**, Ampere GA102, Compute Capability 8.6) against an enterprise datacenter accelerator (**NVIDIA L40S**, Ada Lovelace AD102, Compute Capability 8.9, benchmarked on identical matrix dimensions via partner repository dataset `i-am-space/PAIA-A1`).
+To evaluate architectural scaling across heterogeneous NVIDIA microarchitectures as stipulated by the assignment specification, we performed cross-architectural benchmarking comparing our primary workstation GPU (**NVIDIA GeForce RTX 3090**, Ampere GA102, Compute Capability 8.6) against an enterprise datacenter accelerator (**NVIDIA L40S**, Ada Lovelace AD102, Compute Capability 8.9).
 
 ---
 
@@ -636,7 +636,7 @@ The transition from Ampere (GA102) to Ada Lovelace (AD102) represents a substant
 | **Ridge Point ($AI_{\text{ridge}}$)** | **38.0 FLOPs / Byte** | **106.0 FLOPs / Byte** | **2.79× higher machine balance** |
 | **Thermal Design Power (TDP)** | 350 Watts | 350 Watts | Identical electrical envelope |
 
-> [!IMPORTANT]
+
 > **The Ada Lovelace Ridge Point Divergence:**
 > On Ampere (RTX 3090), the machine balance is $38.0 \text{ FLOPs/byte}$, meaning any kernel achieving an arithmetic intensity above 38 FLOPs/byte becomes compute-bound. On Ada Lovelace (L40S), peak compute expanded by **2.57×** while external DRAM bandwidth *contracted* by **7.7%** (GDDR6 without PAM4 signaling), elevating the ridge point to **106.0 FLOPs/byte**. To offset this severe off-chip bandwidth bottleneck, NVIDIA expanded the on-chip L2 cache by **16× (96 MB)**, fundamentally altering memory hierarchy dynamics.
 
@@ -745,30 +745,7 @@ In Kernel 1 (Naive) and Kernel 2 (Coalesced):
 
 ---
 
-### 6.5 Automated Multi-GPU Execution Protocol
-
-To reproduce these benchmarks on any connected NVIDIA GPU architecture (e.g., Turing `sm_75`, Ampere `sm_80`/`sm_86`, Ada Lovelace `sm_89`, Hopper `sm_90`):
-
-```bash
-# 1. Compile the suite (automatically detects host GPU compute capability)
-make all
-
-# 2. Run automated validation suite (verifies correctness against cuBLAS across 121 configurations)
-./build/validate
-
-# 3. Run complete benchmark sweep and parameter sensitivity
-./scripts/run_benchmarks.sh
-
-# 4. Generate standalone GPU publication plots
-python3 analysis/plot_results.py results/$(cat results/current_gpu.txt)/ --save
-
-# 5. Generate comparative multi-architecture plots (across all profiled GPUs in results/)
-python3 analysis/compare_gpus.py results/ --save
-```
-
----
-
-## 7. Preliminary Conclusions & Future Roadmap
+## 7. Preliminary Conclusions
 
 ### Conclusions
 1. **Memory Hierarchy Dominance:** Naive matrix multiplication is bottlenecked by global memory bandwidth and transaction fragmentation ($1.2\%$ efficiency). Addressing coalescing and shared memory caching provides an immediate order-of-magnitude improvement ($12.1\%$).
@@ -776,7 +753,3 @@ python3 analysis/compare_gpus.py results/ --save
 3. **Warp-Level Scheduling Reaches cuBLAS Parity:** Hierarchical warp tiling achieves **$89.8\%$ of cuBLAS throughput (21,888 GFLOPS)** on FP32 non-Tensor Core units, confirming Simon Boehm's foundational thesis.
 4. **Hardware Pipeline Overlap:** Ampere `cp.async` delivers clean latency hiding without register overhead.
 
-### Next Steps for Final Report
-- Execute identical automated sweeps on Hopper (H100, SM 90a) and Blackwell (B200, SM 100) to evaluate architecture-specific asynchronous pipeline and TMA (Tensor Memory Accelerator) scaling.
-- Integrate Tensor Core WMMA / MMA instructions (`mma.sync.aligned.m16n8k8.row.col`) to investigate FP16/TF32 tensor acceleration exceeding 100+ TFLOPS.
-- Correlate Nsight Compute hardware performance counters with theoretical memory transaction models across architectures.
