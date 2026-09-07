@@ -504,6 +504,127 @@ def plot_param_sweep_heatmap(results_dir, save=False):
             plt.close()
 
 
+def plot_hardware_metrics(results_dir, save=False):
+    """Plot hardware profiling metrics from Nsight Compute (ncu_metrics.csv)."""
+    csv_path = os.path.join(results_dir, 'ncu_metrics.csv')
+    if not os.path.exists(csv_path):
+        print(f"  Note: {csv_path} not found, skipping hardware metrics plot")
+        return
+
+    df = pd.read_csv(csv_path)
+    if len(df) == 0:
+        return
+
+    # Convert numeric columns
+    numeric_cols = [
+        'registers_per_thread', 'occupancy_pct', 'bank_conflicts_ld',
+        'l2_hit_rate_pct', 'sm_throughput_pct', 'dram_throughput_pct'
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+
+    # Short kernel names for compact x-axis
+    short_names = [
+        name.replace('_Blocktile', '-BT').replace('_Vectorized', '-Vec')
+        .replace('_Bank_Extra_Col', '-Pad').replace('_Warptiling', '-Warp')
+        .replace('_Double_Buffering', '-DBuf').replace('_Transpose', '-Tr')
+        .replace('_Recursive_Tile', '-Rec').replace('_Coalescing', '-Coal')
+        .replace('_Caching', '-Smem')
+        for name in df['kernel_name']
+    ]
+
+    gpu_name = df['gpu'].iloc[0] if 'gpu' in df.columns else 'GPU'
+    fig, axes = plt.subplots(2, 2, figsize=(16, 11))
+    fig.suptitle(f'Nsight Compute Low-Level Hardware Profiling — {gpu_name}',
+                 fontsize=15, fontweight='bold', y=0.98)
+
+    x = np.arange(len(df))
+
+    # Panel 1: Register Allocation vs. Warp Occupancy
+    ax1 = axes[0, 0]
+    color_bar = '#3498db'
+    color_line = '#e74c3c'
+    bars1 = ax1.bar(x, df['registers_per_thread'], width=0.55, color=color_bar, alpha=0.85, label='Registers / Thread')
+    ax1.set_ylabel('Registers / Thread', color=color_bar, fontweight='bold')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(short_names, rotation=35, ha='right', fontsize=9)
+    ax1.set_title('(a) Register Allocation & Warp Occupancy', fontweight='bold')
+    ax1.axhline(255, color='#c0392b', linestyle='--', linewidth=1.2, alpha=0.7, label='Hardware Limit (255)')
+
+    # Add values on top of bars
+    for bar in bars1:
+        h = bar.get_height()
+        if not np.isnan(h) and h > 0:
+            ax1.text(bar.get_x() + bar.get_width()/2., h + 3, f'{int(h)}',
+                     ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+    ax1_twin = ax1.twinx()
+    ax1_twin.grid(False)
+    line1 = ax1_twin.plot(x, df['occupancy_pct'], color=color_line, marker='o', linewidth=2.2,
+                          markersize=6, label='Active Warp Occupancy (%)')
+    ax1_twin.set_ylabel('Theoretical Occupancy (%)', color=color_line, fontweight='bold')
+    ax1_twin.set_ylim(0, 100)
+
+    # Panel 2: Shared Memory Bank Conflicts on Loads
+    ax2 = axes[0, 1]
+    conflict_vals = df['bank_conflicts_ld'].fillna(0)
+    colors_conflicts = ['#2ecc71' if v == 0 else '#e74c3c' for v in conflict_vals]
+    bars2 = ax2.bar(x, conflict_vals, width=0.55, color=colors_conflicts, alpha=0.85)
+    ax2.set_ylabel('Bank Conflicts on Loads (Log Scale)', fontweight='bold')
+    ax2.set_yscale('symlog', linthresh=1000)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(short_names, rotation=35, ha='right', fontsize=9)
+    ax2.set_title('(b) Shared Memory Bank Conflicts on Loads', fontweight='bold')
+
+    for bar, val in zip(bars2, conflict_vals):
+        if val > 0:
+            label = f'{val/1e6:.1f}M' if val >= 1e6 else f'{val/1e3:.0f}K'
+            ax2.text(bar.get_x() + bar.get_width()/2., val * 1.3, label,
+                     ha='center', va='bottom', fontsize=8, fontweight='bold', color='#c0392b')
+        else:
+            ax2.text(bar.get_x() + bar.get_width()/2., 50, '0',
+                     ha='center', va='bottom', fontsize=8, fontweight='bold', color='#27ae60')
+
+    # Panel 3: Memory Hierarchy: L2 Cache Hit Rate (%)
+    ax3 = axes[1, 0]
+    l2_vals = df['l2_hit_rate_pct'].fillna(0)
+    bars3 = ax3.bar(x, l2_vals, width=0.55, color='#9b59b6', alpha=0.85)
+    ax3.set_ylabel('L2 Cache Hit Rate (%)', fontweight='bold')
+    ax3.set_ylim(0, 105)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(short_names, rotation=35, ha='right', fontsize=9)
+    ax3.set_title('(c) Memory Hierarchy: L2 Cache Hit Rate', fontweight='bold')
+    ax3.axhline(90, color='#27ae60', linestyle=':', linewidth=1.2, alpha=0.7, label='90% Target')
+
+    for bar in bars3:
+        h = bar.get_height()
+        if not np.isnan(h) and h > 0:
+            ax3.text(bar.get_x() + bar.get_width()/2., h + 1.5, f'{h:.1f}%',
+                     ha='center', va='bottom', fontsize=8, fontweight='bold')
+
+    # Panel 4: Compute (SM) vs. Memory (DRAM) Throughput Utilization
+    ax4 = axes[1, 1]
+    width = 0.35
+    ax4.bar(x - width/2, df['sm_throughput_pct'], width, label='SM Compute Utilization (%)', color='#2ecc71', alpha=0.85)
+    ax4.bar(x + width/2, df['dram_throughput_pct'], width, label='DRAM Bandwidth Utilization (%)', color='#e67e22', alpha=0.85)
+    ax4.set_ylabel('Throughput (% of Peak)', fontweight='bold')
+    ax4.set_ylim(0, 100)
+    ax4.set_xticks(x)
+    ax4.set_xticklabels(short_names, rotation=35, ha='right', fontsize=9)
+    ax4.set_title('(d) Hardware Utilization: Compute vs. Memory', fontweight='bold')
+    ax4.legend(loc='upper right', frameon=True)
+
+    plt.tight_layout()
+    if save:
+        out_path = os.path.join(results_dir, 'plot_hardware_metrics.png')
+        fig.savefig(out_path)
+        print(f"  Saved: plot_hardware_metrics.png")
+    else:
+        plt.show()
+    plt.close()
+
+
 def main():
     parser = argparse.ArgumentParser(description='Generate plots from SGEMM benchmark results')
     parser.add_argument('results_dir', help='Path to results directory for a GPU')
@@ -525,6 +646,7 @@ def main():
     plot_roofline(df, results_dir, save=args.save)
     plot_param_sweep_analysis(results_dir, save=args.save)
     plot_param_sweep_heatmap(results_dir, save=args.save)
+    plot_hardware_metrics(results_dir, save=args.save)
 
     print("\nDone! All plots saved cleanly.")
 

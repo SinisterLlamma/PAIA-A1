@@ -344,6 +344,14 @@ The table below displays the actual hardware performance counters measured by NV
 | **10** | **10_Transpose** | 9.36% | 0.26% | 81.81% | 99.09% | **0** | 0 | 39 | 65.76% |
 | **11** | **11_Recursive_Tile** | **69.06%** | 3.13% | **91.25%** | 3.01% | **0** | 36,240 | 38 | 66.51% |
 
+![Nsight Compute Low-Level Hardware Profiling](assets/plot_hardware_metrics.png)
+
+The 4-panel figure above visualizes the low-level physical counters across optimization stages:
+- **Panel (a) Register Allocation & Warp Occupancy:** Demonstrates the strict inverse scaling between per-thread register pressure (blue bars) and active warp occupancy (red line). As register count rises from 40 in Naive up to 168 in Warp Tiling and 210 in Double Buffering, occupancy drops from $65.5\% \to 8.3\%$, yet instruction-level parallelism (ILP) enables peak compute saturation while remaining comfortably below the 255-register hardware limit line.
+- **Panel (b) Shared Memory Bank Conflicts on Loads:** Highlights the critical bank conflict bottleneck in Kernel 5 ($1.05 \text{ Million conflicts}$) on $B_s$, cut in half to $524\text{K conflicts}$ in Kernel 6 by transposing $A_s$, and completely eliminated down to **0 conflicts** in Kernel 8 (Warp Tiling) and Kernel 9 (Double Buffering).
+- **Panel (c) Memory Hierarchy: L2 Cache Hit Rate:** Confirms strong spatial and temporal locality across the GPU's 6.0 MB L2 crossbar cache, exceeding the $90\%$ threshold for cuBLAS ($92.0\%$), Kernel 2 ($89.8\%$), Kernel 3 ($91.5\%$), and Kernel 11 ($91.3\%$).
+- **Panel (d) Hardware Utilization (Compute vs. Memory):** Compares SM compute pipeline utilization (green) vs. off-chip DRAM bandwidth consumption (orange), clearly demarcating memory-saturating kernels from compute-bound kernels.
+
 ---
 
 ### 5.2 Global Memory Instruction Coalescing Efficiency & Bus Transactions
