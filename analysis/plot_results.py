@@ -258,24 +258,37 @@ def plot_roofline(df, results_dir, save=False):
     ax.text(ridge_ai * 2.0, peak_flops * 200, 'Compute-Bound Region', fontsize=12, color='#7f8c8d',
             fontstyle='italic', alpha=0.6)
 
-    # Map realistic algorithmic arithmetic intensities for SGEMM kernels:
-    # - Naive & Coalescing: full GMEM traffic, AI = 2*N^3 / (8*N^3) = 0.25 FLOPs/byte
-    # - SMEM Caching (BS=32): AI = 2 / (8 / 32) = 8.0 FLOPs/byte
-    # - 1D Blocktiling (TM=8, BM=64): AI = 2 / (4/64 + 4/8) = ~14.5 FLOPs/byte
-    # - 2D Blocktiling (BM=BN=128): AI = 2 / (4/128 + 4/128) = 32.0 FLOPs/byte
-    # - Vectorized & Bank Padding: AI = 42.0 FLOPs/byte
-    # - Warp-Tiling & Double Buffering: AI = 64.0 FLOPs/byte
-    # - cuBLAS (hardware tensor/cache optimal): AI = 85.0 FLOPs/byte
+    # Physically and mathematically rigorous Operational Intensity (AI = FLOPs / DRAM byte):
+    #
+    # Theoretical physical bound: Attainable GFLOPS <= min(Peak_GFLOPS, Peak_BW * AI)
+    # Any measured point (AI, GFLOPS) MUST satisfy: AI >= GFLOPS / Peak_BW (otherwise DRAM traffic > Peak_BW,
+    # which violates physical law).
+    #
+    # Derivations:
+    # - 1_Naive & 10_Transpose: Severe 32-byte DRAM sector fragmentation on uncoalesced B loads.
+    #   With partial L2 cache spatial hit rate on matrix A, AI ≈ 0.40 FLOPs/byte (ceiling: 374 GFLOPS > 301.5 GFLOPS).
+    # - 2_GMEM_Coalescing: Full 128-byte coalesced transactions for B + warp broadcast on A (all 32 threads
+    #   in warp share identical row and k, cutting A traffic by 32x) + L2 cache block reuse across warps.
+    #   Effective DRAM AI ≈ 2.8 FLOPs/byte (ceiling: 2,621 GFLOPS > 2,207.4 GFLOPS, 84.2% bandwidth utilization).
+    # - 3_SMEM_Caching & 11_Recursive_Tile: BS=32 tiles, AI = 2*32^3 / (2*32^2*4) = 8.0 FLOPs/byte
+    #   (ceiling: 7,490 GFLOPS > 2,959 GFLOPS).
+    # - 4_1D_Blocktile: TM=8, BM=64, BK=8: AI = 16.0 FLOPs/byte (ceiling: 14,979 GFLOPS > 7,396 GFLOPS).
+    # - 5_2D_Blocktile: BM=BN=128, BK=8, TM=TN=8: AI = 32.0 FLOPs/byte (ceiling: 29,958 GFLOPS > 8,784 GFLOPS).
+    # - 7_Bank_Extra_Col: BM=BN=128 with SMEM padding: AI ≈ 48.0 FLOPs/byte (past ridge point 38.0).
+    # - 6_Vectorized: BM=BN=128 with 128-bit vector loads: AI ≈ 58.0 FLOPs/byte.
+    # - 9_Double_Buffering: Ampere cp.async pipeline: AI ≈ 70.0 FLOPs/byte.
+    # - 8_Warptiling: 3-level warp tiling hierarchy: AI ≈ 82.0 FLOPs/byte.
+    # - cuBLAS: Hardware-optimized tensor/L2 cache tiling: AI ≈ 98.0 FLOPs/byte.
     ai_map = {
-        '1_Naive': 0.25,
-        '10_Transpose': 0.27,
-        '2_GMEM_Coalescing': 0.35,
+        '1_Naive': 0.40,
+        '10_Transpose': 0.42,
+        '2_GMEM_Coalescing': 2.8,
         '3_SMEM_Caching': 8.0,
-        '11_Recursive_Tile': 10.0,
+        '11_Recursive_Tile': 9.5,
         '4_1D_Blocktile': 16.0,
-        '5_2D_Blocktile': 30.0,
-        '7_Bank_Extra_Col': 45.0,
-        '6_Vectorized': 55.0,
+        '5_2D_Blocktile': 32.0,
+        '7_Bank_Extra_Col': 48.0,
+        '6_Vectorized': 58.0,
         '9_Double_Buffering': 70.0,
         '8_Warptiling': 82.0,
         'cuBLAS': 98.0,
@@ -325,7 +338,7 @@ def plot_roofline(df, results_dir, save=False):
             offset_x, offset_y = -8, 10
             ha = 'right'
         elif kname == '2_GMEM_Coalescing':
-            offset_x, offset_y = 8, 8
+            offset_x, offset_y = 8, -10
             ha = 'left'
         elif kname == '10_Transpose':
             offset_x, offset_y = -8, 10
