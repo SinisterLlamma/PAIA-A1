@@ -133,12 +133,12 @@ To fulfill the primary assignment directive, we cloned and studied Simon Boehm's
 
 | Dimension / Optimization | Simon Boehm's Implementation | Our Repository Implementation | Analysis & Architectural Impact |
 | :--- | :--- | :--- | :--- |
-| **Target Architecture** | NVIDIA RTX 2080 Ti (Turing, SM 7.5) | NVIDIA RTX 3090 (Ampere, SM 8.6) | Ampere features 128 FP32 units/SM (dual-issue) vs 64 on Turing, doubling compute density per SM. |
+| **Target Architecture** | **NVIDIA RTX A6000** (Ampere GA102, SM 8.6) | **NVIDIA RTX 3090** (Ampere GA102, SM 8.6) | Both GPUs share the identical Ampere GA102 microarchitecture (A6000: 84 SMs, 48 GB GDDR6 @ 768 GB/s; RTX 3090: 82 SMs, 24 GB GDDR6X @ 936 GB/s), explaining why our benchmark results (e.g., 21,888 GFLOPS vs Boehm's 21,779 GFLOPS) align with near-perfect consistency. |
 | **Kernel 8 Warp Sizing** | Block: $128 \times 128$, Warp: $32 \times 64$, Thread: $8 \times 8$ | Block: $128 \times 128$, Warp: $32 \times 64$, Thread: $8 \times 8$ | Direct code reuse of Boehm's warp layout yields **21,888 GFLOPS (89.8% of cuBLAS)**, proving the portability of 3-level tiling. |
-| **Double Buffering** | Software prefetching via registers (`float4 reg = ...; __syncthreads(); smem = reg;`) | Hardware `cp.async` (`cuda::memcpy_async` with `cuda::barrier`) | Boehm's software prefetching consumes extra registers per thread. Ampere hardware `cp.async` bypasses the register file entirely. |
+| **Double Buffering** | Software prefetching via registers (K11) / `cp.async` (K12) | Hardware `cp.async` (`cuda::memcpy_async` with `cuda::barrier`) | Direct adoption of Ampere hardware async memory copy pipeline, completely bypassing the register file during GMEM $\to$ SMEM transfers. |
 | **Boundary Handling** | Strict assumption: $M, N, K \pmod{\text{Tile}} == 0$ (Crashes/OOB on arbitrary dimensions) | Universal boundary guards + dynamic scalar fallback path | Safe execution on arbitrary matrix dimensions ($1000 \times 500 \times 750$) and odd sizes ($127, 255, 513$) with 100% test pass rate. |
 | **Bank Conflict Padding** | `extraCols = 5` in Kernel 8 & 9 | Retained `extraCols = 5` in Kernel 7 & 8 | Eliminates bank conflicts when loading $8 \times 8$ sub-tiles across warp lanes. |
-| **Build & Tooling** | Custom Makefile with hardcoded sm_75 | Dynamic CMake + Makefile with automated architecture detection | Supports multi-GPU environments seamlessly (`sm_70`, `sm_75`, `sm_80`, `sm_86`, `sm_90`). |
+| **Build & Tooling** | Static Makefile / CMake with manual compute capability | Dynamic CMake + Makefile with automated architecture detection | Supports multi-GPU environments seamlessly (`sm_70`, `sm_75`, `sm_80`, `sm_86`, `sm_90`). |
 
 ---
 
