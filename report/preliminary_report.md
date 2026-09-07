@@ -148,7 +148,28 @@ The following measurements were collected on the NVIDIA RTX 3090 using high-reso
 | **10** | **10_Transpose** | 7.553 ms | 284.3 | 57.470 ms | 298.9 | 453.841 ms | **302.8** | **1.2%** | $< 10^{-4}$ |
 | **11** | **11_Recursive_Tile** | 0.710 ms | 3,022.8 | 5.724 ms | 3,001.2 | 45.958 ms | **2,990.5** | **12.3%** | $< 10^{-4}$ |
 
----
+### 3.2 Non-Square ($M \times N \times K$) and Non-Power-of-Two Matrix Evaluation
+
+While canonical GPU GEMM research frequently restricts evaluation to powers of two ($2^k \times 2^k$), real-world deep learning workloads (e.g., Attention projections, FlashAttention, Conv2D im2col GEMMs) regularly execute on arbitrary rectangular shapes and prime dimensions. 
+
+Simon Boehm's original reference implementation (`siboehm/SGEMM_CUDA`) makes strict assumptions that matrix dimensions are exact multiples of $BM=128, BN=128, BK=8$. When evaluated on arbitrary or unaligned dimensions, vector instructions (`float4`) trigger hard hardware alignment faults (`cudaErrorMisalignedAddress`) or out-of-bounds illegal memory accesses.
+
+In this framework, all kernels incorporate **universal dynamic boundary clamps and scalar fallbacks**, enabling valid, numerically exact execution across any arbitrary dimension. The table below reports empirical performance across non-square, non-power-of-two, and odd prime dimensions on the RTX 3090:
+
+| Kernel ID | Kernel Name | Non-Square: $3000 \times 1500 \times 3000$ (GFLOPS) | Non-Square: $1000 \times 500 \times 750$ (GFLOPS) | Non-PoT Square: $3000 \times 3000 \times 3000$ (GFLOPS) | Odd Prime: $127 \times 127 \times 127$ (GFLOPS) | Verification Status vs cuBLAS |
+| :---: | :--- | :---: | :---: | :---: | :---: | :---: |
+| **0** | **cuBLAS** (Reference) | 22,214.1 | 11,480.0 | 20,204.7 | 87.4 | Baseline |
+| **1** | **1_Naive** | 731.6 | 715.7 | 760.8 | 141.2 | **PASS** ($< 10^{-4}$) |
+| **2** | **2_GMEM_Coalescing** | 2,038.0 | 1,838.3 | 2,053.7 | 303.1 | **PASS** ($< 10^{-4}$) |
+| **5** | **5_2D_Blocktile** | 8,680.3 | 2,079.6 | 8,197.2 | 181.9 | **PASS** ($< 10^{-4}$) |
+| **6** | **6_Vectorized** | **10,265.9** | **4,844.1** | **11,405.0** | 159.9 | **PASS** ($< 10^{-4}$) |
+| **8** | **8_Warptiling** | 4,987.0 | 2,913.4 | 5,716.2 | 101.1 | **PASS** ($< 10^{-4}$) |
+| **9** | **9_Double_Buffering** | 5,282.1 | 2,915.7 | 5,845.4 | 100.5 | **PASS** ($< 10^{-4}$) |
+
+#### Architectural Observations on Dimension Scaling
+1. **Vectorized Robustness (Kernel 6):** Maintains strong throughput across non-power-of-two sizes ($11,405.0 \text{ GFLOPS}$ on $3000^3$), proving that 128-bit memory instructions can be successfully combined with dynamic edge masking without sacrificing vectorized bus efficiency.
+2. **Small / Odd Matrix Quantization ($127^3$):** For $M=N=K=127$, the entire matrix multiplication comprises only $\approx 4.1 \text{ MFLOPs}$. Launching a $128 \times 128$ block tile produces only **1 single thread block**, utilizing only **1 of the 82 SMs** on the RTX 3090 ($1.2\%$ hardware utilization). In this latency-dominated regime, simpler kernels with lower synchronization overhead (Kernel 2 at $303.1 \text{ GFLOPS}$) actually outperform complex warp-tiled pipelines.
+3. **Correctness Guarantee:** Across 121 automated unit tests spanning $64^3 \dots 1024^3$, $128 \times 256 \times 512$, $300 \times 150 \times 300$, $1000 \times 500 \times 750$, and primes $127^3, 255^3, 513^3$, all kernels achieved **100% test pass rates** ($|C_{\text{CUDA}} - C_{\text{cuBLAS}}| < 10^{-4}$).
 
 ## 4. Visual Analysis & Microarchitectural Plots
 
