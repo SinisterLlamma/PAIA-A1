@@ -1,0 +1,22 @@
+=============================================
+GPU Hardware Information: NVIDIA L40S
+=============================================
+
+GPU Architecture:         NVIDIA Ada Lovelace (AD102)
+Compute Capability:       sm_89 (8.9)
+Streaming Multiprocessors: 142 SMs
+CUDA Cores:               18,176 FP32 CUDA Cores
+Tensor Cores:             568 4th-Gen Tensor Cores
+GPU Base / Boost Clock:   795 MHz / 2,520 MHz
+Peak FP32 Compute:        91.6 TFLOPS (91,600 GFLOPS)
+Peak TF32 Tensor Compute: 183.2 TFLOPS (Dense) / 366.4 TFLOPS (Sparse)
+Global Memory (VRAM):     48 GB GDDR6 with Error-Correcting Code (ECC)
+Memory Bus Width:         384-bit
+Memory Clock & Bandwidth: 864.0 GB/s (18 Gbps)
+L2 Cache Capacity:        96.0 MB (98,304 KB) - 16× larger than GA102
+Shared Memory per SM:     Up to 100 KB configurable (unified L1 / SMEM)
+Registers per SM:         65,536 (32-bit registers)
+Machine Balance (Ridge):  106.0 FLOPs / Byte (91,600 GFLOPS / 864 GB/s)
+Process Technology:       TSMC 4N (5nm custom)
+Max Power Limit (TDP):    350 Watts
+Host Environment:         Linux, CUDA 12.4, sm_89
