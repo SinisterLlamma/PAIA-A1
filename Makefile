@@ -97,9 +97,16 @@ plots: $(RESULTS)/benchmarks.csv
 compare:
 	python3 analysis/compare_gpus.py results/
 
+# Generate publication-grade PDF matching exact Markdown preview
+pdf:
+	@echo "===== Generating publication PDF report ====="
+	/home/harsha/.antigravity-ide-server/bin/2.5.5-ecfbad74d93962fc8ca485d93ab9b4f3d4cb6cf8/node scripts/generate_pdf.js
+
 # =============================================================================
 # Convenience: do everything
 # =============================================================================
-full: validate gpu-info sweep param-sweep profile-ncu profile-nsys plots
+full: validate gpu-info sweep param-sweep profile-ncu profile-nsys plots pdf
 	@echo "===== Full analysis complete ====="
 	@echo "Results in: $(RESULTS)/"
+	@echo "PDF Report: report/preliminary_report.pdf"
+

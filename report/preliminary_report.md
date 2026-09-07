@@ -11,14 +11,11 @@
 
 Matrix Multiplication ($C = \alpha AB + \beta C$, specifically Single-Precision GEMM / SGEMM) is the fundamental computational primitive underpinning modern deep learning systems, scientific computing, and computer vision pipelines. While modern GPU architectures deliver theoretical peak compute performance in excess of tens of teraflops, naive CUDA implementations typically extract less than $2\%$ of this computational capacity due to severe memory latency, uncoalesced bus transactions, and pipeline stalls.
 
-In this preliminary investigation, we systematically engineer, profile, and evaluate a progressive hierarchy of twelve (12) CUDA SGEMM kernels on the NVIDIA Ampere architecture (RTX 3090). We cross-reference and adapt architectural techniques from Simon Boehm's canonical reference (`siboehm/SGEMM_CUDA`), while augmenting the framework with Ampere hardware asynchronous pipeline copies (`cp.async`), universal boundary guard fallback mechanisms for non-square and odd matrix dimensions, automated multi-GPU architecture detection, and comprehensive Nsight Compute (`ncu`) / Nsight Systems (`nsys`) profiling workflows.
 
 ### Key Highlights
 - **Performance Trajectory:** Throughput scales from **301.5 GFLOPS (1.2% of cuBLAS)** in the naive baseline up to **21,888.0 GFLOPS (89.8% of cuBLAS)** in our multi-level warp-tiled implementation for $N=4096$, achieving an overall **72.6× speedup**.
 - **Hardware Asynchronous Pipeline:** Leveraging Ampere's hardware `cp.async` instructions (`cuda::memcpy_async` with `cuda::barrier`) delivers **18,105.1 GFLOPS (74.3% of cuBLAS)**, completely bypassing the Register File (RF) during global-to-shared memory staging.
 - **Roofline Alignment:** Empirical operational intensity increases from $0.25 \text{ FLOP/byte}$ (severely memory-bound) to $>80 \text{ FLOP/byte}$, successfully crossing the architecture's ridge point ($38.0 \text{ FLOP/byte}$) into the compute-saturated regime.
-- **Robustness & Validation:** All kernels passed **121 out of 121 automated validation tests** across square ($128^3$ to $4096^3$), non-square ($1000 \times 500 \times 750$), and odd prime dimensions ($127^3, 255^3, 513^3$) with zero numerical errors ($|C_{\text{CUDA}} - C_{\text{cuBLAS}}| < 10^{-4}$).
-
 ---
 
 ## 1. System & Microarchitecture Characterization
@@ -38,7 +35,6 @@ All experiments in this report were executed on a dedicated NVIDIA GeForce RTX 3
 | **Shared Memory (per SM)** | Up to 100 KB configurable | Unified with L1 data cache; 32 banks, 4 bytes/bank |
 | **Max Registers per SM / Block** | 65,536 (32-bit) / 65,536 | Determines warp occupancy and register spilling threshold |
 | **Ridge Point ($AI_{\text{ridge}}$)** | **38.0 FLOPs / Byte** | $35,580 \text{ GFLOPS} / 936.2 \text{ GB/s}$ |
-| **Host System & Compiler** | Linux 6.8.0, CUDA 12.4, GCC 11.4 | `-O3 -use_fast_math -arch=sm_86 -std=c++20` |
 
 ---
 
@@ -150,7 +146,6 @@ The following measurements were collected on the NVIDIA RTX 3090 using high-reso
 
 ### 3.2 Non-Square ($M \times N \times K$) and Non-Power-of-Two Matrix Evaluation
 
-While canonical GPU GEMM research frequently restricts evaluation to powers of two ($2^k \times 2^k$), real-world deep learning workloads (e.g., Attention projections, FlashAttention, Conv2D im2col GEMMs) regularly execute on arbitrary rectangular shapes and prime dimensions. 
 
 Simon Boehm's original reference implementation (`siboehm/SGEMM_CUDA`) makes strict assumptions that matrix dimensions are exact multiples of $BM=128, BN=128, BK=8$. When evaluated on arbitrary or unaligned dimensions, vector instructions (`float4`) trigger hard hardware alignment faults (`cudaErrorMisalignedAddress`) or out-of-bounds illegal memory accesses.
 
@@ -422,8 +417,7 @@ The analytical table below details the theoretical resource boundaries across al
 | **11** | **11_Recursive_Tile** | 38 | 100.0% | 48 / 48 | 8,192 B (8 KB) | 3 (1024 thds) | 100.0% | On-Chip SMEM (L1) | 0 load conflicts | Moderate synchronization overhead |
 
 #### Empirical NVIDIA Nsight Compute (`ncu`) Hardware Measurements
-The table below displays the actual hardware performance counters measured by NVIDIA Nsight Compute (`ncu`) directly on the target RTX 3090 GPU (output saved in `results/NVIDIA_GeForce_RTX_3090/ncu_metrics.csv` and reports in `results/NVIDIA_GeForce_RTX_3090/ncu_profiles/*.ncu-rep`):
-
+The table below displays the actual hardware performance counters measured by NVIDIA Nsight Compute (`ncu`) directly on the target RTX 3090 GPU 
 | Kernel ID | Kernel Name | SM Throughput (%) | DRAM Throughput (%) | L2 Cache Hit Rate (%) | L1 Cache Hit Rate (%) | SMEM Bank Conflicts (Loads) | SMEM Bank Conflicts (Stores) | Registers / Thread | Active Warps / Occupancy (%) |
 | :---: | :--- | :---: | :---: | :---: | :---: | :---: | :---: | :---: | :---: |
 | **0** | **cuBLAS** (Reference) | **51.83%** | 8.56% | **91.98%** | 0.00% | **0** | 241,664 | 82 | 25.28% |
